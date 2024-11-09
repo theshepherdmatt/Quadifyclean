@@ -4,13 +4,10 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 from luma.core.interface.serial import spi
 from luma.oled.device import ssd1322
-from socketio
+import socketio
 import os
 from io import BytesIO
 
-from PIL import Image
-import requests
-from io import BytesIO
 
 class WebRadio:
     def __init__(self, device, alt_font, alt_font_medium, local_album_art_path="/home/volumio/Quadify/icons/webradio.bmp"):
