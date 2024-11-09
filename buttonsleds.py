@@ -3,7 +3,7 @@ import time
 import json
 import requests
 import subprocess
-from socketIO_client_nexus import SocketIO
+from socketio
 from enum import Enum
 import threading
 
