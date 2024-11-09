@@ -4,34 +4,12 @@ set -e
 # ============================
 #   Color Code Definitions
 # ============================
-RED='\033[0;31m'        # Red
-GREEN='\033[0;32m'      # Green
-YELLOW='\033[1;33m'     # Yellow
-BLUE='\033[0;34m'       # Blue
-CYAN='\033[0;36m'       # Cyan
-MAGENTA='\033[0;35m'    # Magenta
-NC='\033[0m'            # No Color
-
-# ============================
-#   Log File Definition
-# ============================
-LOG_FILE="/home/volumio/Quadify/install_details.log"
-
-# ============================
-#   Log Message Function
-# ============================
-log_message() {
-    local type="$1"
-    local message="$2"
-    case "$type" in
-        "info") echo -e "${BLUE}[INFO]${NC} $message" ;;
-        "success") echo -e "${GREEN}[SUCCESS]${NC} $message" ;;
-        "warning") echo -e "${YELLOW}[WARNING]${NC} $message" ;;
-        "error") echo -e "${RED}[ERROR]${NC} $message" >&2 ;;
-        "highlight") echo -e "${MAGENTA}$message${NC}" ;;
-        *) echo -e "[UNKNOWN] $message" ;;
-    esac
-}
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+NC='\033[0m'
 
 # ============================
 #   ASCII Art Banner Function
@@ -47,36 +25,17 @@ banner() {
 }
 
 # ============================
-#   Spinner Function
+#   Log Message Function
 # ============================
-spinner() {
-    local pid=$1
-    local delay=0.1
-    local spinstr='|/-\'
-    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
-        local temp=${spinstr#?}
-        printf " [%c]  " "$spinstr"
-        local spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b\b\b\b"
-    done
-    printf "    \b\b\b\b"
-}
-
-# ============================
-#   Prompt User Function
-# ============================
-prompt_user() {
-    local message="$1"
-    local response
-    while true; do
-        read -rp "$(echo -e "${CYAN}$message [y/n]: ${NC}")" response
-        case "$response" in
-            [Yy]* ) return 0;;
-            [Nn]* ) return 1;;
-            * ) echo -e "${YELLOW}Please answer yes or no.${NC}";;
-        esac
-    done
+log_message() {
+    local type="$1"
+    local message="$2"
+    case "$type" in
+        "info") echo -e "${BLUE}[INFO]${NC} $message" ;;
+        "success") echo -e "${GREEN}[SUCCESS]${NC} $message" ;;
+        "warning") echo -e "${YELLOW}[WARNING]${NC} $message" ;;
+        "error") echo -e "${RED}[ERROR]${NC} $message" >&2 ;;
+    esac
 }
 
 # ============================
@@ -84,17 +43,9 @@ prompt_user() {
 # ============================
 check_root() {
     if [ "$EUID" -ne 0 ]; then
-        log_message "warning" "Please run as root or use sudo."
+        log_message "error" "Please run as root or use sudo."
         exit 1
     fi
-}
-
-# ============================
-#   Install Python and pip
-# ============================
-install_python() {
-    log_message "info" "Installing Python3 and pip..."
-    apt update && apt install -y python3 python3-pip python3-smbus
 }
 
 # ============================
@@ -102,51 +53,46 @@ install_python() {
 # ============================
 install_dependencies() {
     log_message "info" "Installing required Python libraries..."
-    pip3 install luma.oled Pillow requests socketIO-client-nexus
-}
-
-# ============================
-#   Configure SPI and I2C
-# ============================
-configure_spi_i2c() {
-    log_message "info" "Configuring SPI and I2C interfaces..."
-    echo "dtparam=spi=on" | tee -a /boot/userconfig.txt > /dev/null
-    echo "spi-dev" | tee -a /etc/modules > /dev/null
-    echo "dtparam=i2c_arm=on" | tee -a /boot/userconfig.txt > /dev/null
-    echo "i2c-dev" | tee -a /etc/modules > /dev/null
-    log_message "info" "Reloading configurations. Reboot is recommended after installation."
+    pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0
+    yes | pip3 uninstall websocket websocket-client || true
+    pip3 install websocket-client==1.6.1
 }
 
 
 # ============================
-#   Verify I2C Devices
+#   Detect MCP23017 I2C Address
 # ============================
-
-verify_i2c() {
-    log_message "info" "Verifying I2C configuration and detecting devices..."
-    
-    # Detect I2C devices on bus 1
-    sudo i2cdetect -y 1 | tee -a "$LOG_FILE"
-    
-    # Check if any devices are detected
-    DEVICE_COUNT=$(sudo i2cdetect -y 1 | grep -E '^[0-9a-fA-F]' | grep -v '--' | wc -l)
-    
-    if [ "$DEVICE_COUNT" -gt 0 ]; then
-        log_message "success" "I2C devices detected successfully."
+detect_i2c_address() {
+    log_message "info" "Detecting MCP23017 I2C address..."
+    address=$(i2cdetect -y 1 | grep -o '^[0-9a-f][0-9a-f]')
+    if [[ -z "$address" ]]; then
+        log_message "warning" "MCP23017 not found. Check wiring and ensure connections are correct."
     else
-        log_message "warning" "No I2C devices detected. Please check your connections and device addresses."
+        log_message "success" "Detected MCP23017 at I2C address: 0x$address."
+        update_buttonsleds_address "$address"
     fi
 }
 
 # ============================
-#   Setup Main Service
+#   Update MCP23017 Address in buttonsleds.py
 # ============================
+update_buttonsleds_address() {
+    local detected_address="$1"
+    BUTTONSLEDS_FILE="/home/volumio/Quadify/buttonsleds.py"
+    if [[ -f "$BUTTONSLEDS_FILE" ]]; then
+        sed -i "s/MCP23017_ADDRESS = 0x[0-9a-f][0-9a-f]/MCP23017_ADDRESS = 0x$detected_address/" "$BUTTONSLEDS_FILE"
+        log_message "success" "Updated MCP23017 address in buttonsleds.py to 0x$detected_address."
+    else
+        log_message "error" "buttonsleds.py not found. Ensure the path is correct."
+    fi
+}
 
+# ============================
+#   Configure Systemd Service
+# ============================
 setup_main_service() {
     log_message "info" "Setting up the Main Quadify Service..."
-
-    # Create the systemd service file
-    tee /etc/systemd/system/quadify_main.service > /dev/null <<EOL
+    tee /etc/systemd/system/quadify.service > /dev/null <<EOL
 [Unit]
 Description=Quadify Main Service
 After=network.target
@@ -163,42 +109,22 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOL
-
-    # Reload systemd to apply the new service
     systemctl daemon-reload
-
-    # Enable the service to start on boot
-    systemctl enable quadify_main.service >> "$LOG_FILE" 2>&1 &
-
-    # Start the service immediately
-    systemctl start quadify_main.service >> "$LOG_FILE" 2>&1 &
-    
+    systemctl enable quadify.service
+    systemctl start quadify.service
     log_message "success" "Main Quadify Service has been created, enabled, and started."
 }
-
-# Call the function within your main installation sequence
-setup_main_service
-
 
 # ============================
 #   Main Installation Function
 # ============================
 main() {
-    # Display the ASCII Art Banner
     banner
-
-    # Check for root privileges
     check_root
-
-    # Install dependencies
-    install_python
     install_dependencies
-
-    # Configure SPI and I2C
-    configure_spi_i2c
-
-    # Final success message
-    log_message "success" "Installation complete. Please reboot to apply hardware settings."
+    detect_i2c_address
+    setup_main_service
+    log_message "success" "Installation complete. Please reboot to apply hardware settings if necessary."
 }
 
 # Execute the main function
