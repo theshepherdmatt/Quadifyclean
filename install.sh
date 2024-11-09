@@ -54,10 +54,7 @@ check_root() {
 install_dependencies() {
     log_message "info" "Installing required Python libraries..."
     pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0
-    yes | pip3 uninstall websocket websocket-client || true
-    pip3 install websocket-client==1.6.1
 }
-
 
 # ============================
 #   Detect MCP23017 I2C Address
