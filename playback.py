@@ -79,8 +79,8 @@ class Playback:
         self.previous_service = None
         self.socketIO = SocketIO(self.host, self.port, LoggingNamespace)
 
-        font_path = "/home/volumio/Quadify/DSEG7Classic-Light.ttf"
-        alt_font_path = "/home/volumio/Quadify/OpenSans-Regular.ttf"
+        font_path = "/home/volumio/Quadify/fonts/DSEG7Classic-Light.ttf"
+        alt_font_path = "/home/volumio/Quadify/fonts/OpenSans-Regular.ttf"
         try:
             self.large_font = ImageFont.truetype(font_path, 45)
             self.alt_font_medium = ImageFont.truetype(alt_font_path, 18)
