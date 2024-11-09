@@ -72,6 +72,7 @@ install_dependencies() {
     log_message "info" "Installing required Python libraries..."
     pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0 Pillow smbus2
 }
+pip3 install websocket-client
 
 
 # ============================
