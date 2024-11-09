@@ -15,7 +15,7 @@ class TidalManager:
         self.tidal_content = []
 
         # Set up the font
-        self.font_path = "/home/volumio/Quadify/OpenSans-Regular.ttf"
+        self.font_path = "/home/volumio/Quadify/fonts/OpenSans-Regular.ttf"
         try:
             self.font = ImageFont.truetype(self.font_path, 12)
         except IOError:
