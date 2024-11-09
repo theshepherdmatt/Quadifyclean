@@ -17,12 +17,12 @@ from mode_Manager import ModeManager
 from menus import PlaylistManager, RadioManager
 from menu_manager import MenuManager
 from buttonsleds import ButtonsLEDController
-from socketIO_client_nexus import SocketIO, LoggingNamespace
+from socketio
 
 GPIO.setwarnings(False)
 
-# Initialize a single SocketIO connection with LoggingNamespace
-volumioIO = SocketIO('localhost', 3000, LoggingNamespace)
+volumioIO = socketio.Client(logger=True, engineio_logger=True)
+volumioIO.connect('http://localhost:3000', namespaces=['/'])
 
 LOADING_GIF_PATH = "/home/volumio/Quadify/Loading.gif"
 
