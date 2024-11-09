@@ -2,6 +2,7 @@ import time
 import threading
 import logging 
 import atexit
+import socketio
 from datetime import datetime
 from luma.core.interface.serial import spi
 from luma.oled.device import ssd1322
@@ -17,7 +18,6 @@ from mode_Manager import ModeManager
 from menus import PlaylistManager, RadioManager
 from menu_manager import MenuManager
 from buttonsleds import ButtonsLEDController
-from socketio
 
 GPIO.setwarnings(False)
 
