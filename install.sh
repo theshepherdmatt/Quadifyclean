@@ -51,14 +51,28 @@ check_root() {
 # ============================
 #   Install Python Packages
 # ============================
+# ============================
+#   Install Python Packages
+# ============================
 install_dependencies() {
+    log_message "info" "Checking for pip3 installation..."
+    if ! command -v pip3 &> /dev/null; then
+        log_message "warning" "pip3 not found. Attempting to install pip3..."
+        apt-get update
+        apt-get install -y python3-pip
+        if ! command -v pip3 &> /dev/null; then
+            log_message "error" "pip3 installation failed. Please install it manually."
+            exit 1
+        fi
+        log_message "success" "pip3 installed successfully."
+    else
+        log_message "success" "pip3 is already installed."
+    fi
+
     log_message "info" "Installing required Python libraries..."
-    pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0 || {
-        log_message "error" "Failed to install required Python packages. Ensure pip3 is installed."
-        exit 1
-    }
-    log_message "success" "Python libraries installed successfully."
+    pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0
 }
+
 
 # ============================
 #   Enable I2C and SPI in userconfig.txt
