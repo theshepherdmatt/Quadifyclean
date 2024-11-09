@@ -4,7 +4,7 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 from luma.core.interface.serial import spi
 from luma.oled.device import ssd1322
-from socketIO_client_nexus import SocketIO, LoggingNamespace
+from socketio
 import os
 from io import BytesIO
 
@@ -77,8 +77,9 @@ class Playback:
         self.running = False
         self.VOL_API_URL = "http://localhost:3000/api/v1/getState"
         self.previous_service = None
-        self.socketIO = SocketIO(self.host, self.port, LoggingNamespace)
-
+        self.socketIO = socketio.Client(logger=True, engineio_logger=True)
+        self.socketIO.connect(f'http://{self.host}:{self.port}', namespaces=['/'])
+        
         font_path = "/home/volumio/Quadify/fonts/DSEG7Classic-Light.ttf"
         alt_font_path = "/home/volumio/Quadify/fonts/OpenSans-Regular.ttf"
         try:
