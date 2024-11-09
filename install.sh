@@ -51,12 +51,6 @@ check_root() {
 # ============================
 #   Install Python Packages
 # ============================
-# ============================
-#   Install Python Packages
-# ============================
-# ============================
-#   Install Python Packages
-# ============================
 install_dependencies() {
     log_message "info" "Checking for pip3 installation..."
     if ! command -v pip3 &> /dev/null; then
@@ -72,13 +66,12 @@ install_dependencies() {
         log_message "success" "pip3 is already installed."
     fi
 
-    log_message "info" "Installing required system libraries for Pillow..."
-    apt-get install -y libjpeg-dev zlib1g-dev libfreetype6-dev
+    log_message "info" "Installing required system libraries for Pillow and smbus..."
+    apt-get install -y libjpeg-dev zlib1g-dev libfreetype6-dev i2c-tools python3-smbus
 
     log_message "info" "Installing required Python libraries..."
-    pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0 Pillow
+    pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0 Pillow smbus2
 }
-
 
 
 # ============================
