@@ -53,7 +53,25 @@ check_root() {
 # ============================
 install_dependencies() {
     log_message "info" "Installing required Python libraries..."
-    pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0
+    pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0 || {
+        log_message "error" "Failed to install required Python packages. Ensure pip3 is installed."
+        exit 1
+    }
+    log_message "success" "Python libraries installed successfully."
+}
+
+# ============================
+#   Enable I2C and SPI in userconfig.txt
+# ============================
+enable_i2c_spi() {
+    log_message "info" "Enabling I2C and SPI in userconfig.txt..."
+    if ! grep -q "dtparam=spi=on" /boot/userconfig.txt; then
+        echo "dtparam=spi=on" | sudo tee -a /boot/userconfig.txt > /dev/null
+    fi
+    if ! grep -q "dtparam=i2c=on" /boot/userconfig.txt; then
+        echo "dtparam=i2c=on" | sudo tee -a /boot/userconfig.txt > /dev/null
+    fi
+    log_message "success" "I2C and SPI enabled in userconfig.txt."
 }
 
 # ============================
@@ -61,9 +79,9 @@ install_dependencies() {
 # ============================
 detect_i2c_address() {
     log_message "info" "Detecting MCP23017 I2C address..."
-    address=$(i2cdetect -y 1 | grep -o '^[0-9a-f][0-9a-f]')
+    address=$(i2cdetect -y 1 | grep -oE '20|21|22|23|24|25|26|27' | head -n 1)
     if [[ -z "$address" ]]; then
-        log_message "warning" "MCP23017 not found. Check wiring and ensure connections are correct."
+        log_message "warning" "MCP23017 not found. Check wiring and connections as per instructions on our website."
     else
         log_message "success" "Detected MCP23017 at I2C address: 0x$address."
         update_buttonsleds_address "$address"
@@ -118,6 +136,7 @@ EOL
 main() {
     banner
     check_root
+    enable_i2c_spi
     install_dependencies
     detect_i2c_address
     setup_main_service
