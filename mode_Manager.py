@@ -206,12 +206,6 @@ class ModeManager:
             self.is_playing = False
             print("Playback mode stopped.")
 
-    def stop_playlist_mode(self):
-        """Stops playlist mode by deactivating the playlist manager display."""
-        if self.playlist_manager and self.playlist_manager.is_active:
-            self.playlist_manager.stop_playlist_mode()
-            print("[ModeManager] Playlist mode stopped.")
-
     def notify_mode_change(self):
         print(f"Mode changed to: {self.current_mode}")
         for callback in self.on_mode_change_callbacks:

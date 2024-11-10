@@ -1,219 +1,119 @@
-import time
+import unittest
 import threading
-import requests
-from PIL import Image, ImageDraw, ImageFont
-from luma.core.interface.serial import spi
-from luma.oled.device import ssd1322
-from socketIO_client_nexus import SocketIO, LoggingNamespace
-import os
-from io import BytesIO
-
+from mode_Manager import ModeManager
 from PIL import Image
-import requests
-from io import BytesIO
 
-class WebRadio:
-    def __init__(self, device, alt_font, alt_font_medium, local_album_art_path="/home/volumio/Quadify/icons/webradio.bmp"):
-        self.device = device
-        self.alt_font = alt_font
-        self.alt_font_medium = alt_font_medium
-        self.local_album_art_path = local_album_art_path  # Local fallback image path
+# Updated Mock classes to satisfy the requirements for oled and clock arguments
+class MockOLED:
+    def __init__(self):
+        self.mode = "RGB"  # Set this to whatever mode your actual OLED uses (e.g., "1" for monochrome)
+        self.width = 128    # Set a reasonable placeholder width for the display
+        self.height = 64    # Set a reasonable placeholder height for the display
 
-        # Load the local BMP fallback album art once during initialization
-        try:
-            self.default_album_art = Image.open(self.local_album_art_path).resize((40, 40)).convert("RGBA")
-        except IOError:
-            print("Local BMP album art not found. Please check the path.")
-            self.default_album_art = None
+    def draw(self, *args, **kwargs):
+        pass
 
-    def draw(self, draw, data, base_image):
-        # Draw web radio text and title
-        draw.text((self.device.width // 2, 15), "Webradio", font=self.alt_font_medium, fill="white", anchor="mm")
-        
-        title = data.get("title", "No Title")
-        draw.text((self.device.width // 2, 35), title, font=self.alt_font, fill="white", anchor="mm")
+    def clear(self):
+        pass
 
-        # Attempt to load album art from URL
-        album_art_url = data.get("albumart")
-        album_art = None
+    def display(self, image):
+        # This method is called when the screen needs to be updated
+        pass
 
-        if album_art_url:
-            try:
-                response = requests.get(album_art_url)
-                # Check if response contains image data
-                if response.headers["Content-Type"].startswith("image"):
-                    album_art = Image.open(BytesIO(response.content)).resize((60, 60)).convert("RGBA")
-                else:
-                    print("Album art URL did not return an image.")
-                    
-            except requests.RequestException:
-                print("Could not load album art (network error).")
-            except (PIL.UnidentifiedImageError, IOError):
-                print("Could not load album art (unsupported format).")
-        
-        # Use the local BMP fallback if URL fetching fails
-        if album_art is None and self.default_album_art:
-            album_art = self.default_album_art
-
-        # Paste album art on display if available
-        if album_art:
-            base_image.paste(album_art, (190, -4), album_art)
-
-
-class Playback:
-    def __init__(self, device, state, mode_manager, host='localhost', port=3000):
-        self.device = device
-        self.state = state
-        self.mode_manager = mode_manager
-        self.host = host
-        self.port = port
-        self.running = False
-        self.VOL_API_URL = "http://localhost:3000/api/v1/getState"
-        self.previous_service = None
-        self.socketIO = SocketIO(self.host, self.port, LoggingNamespace)
-
-        font_path = "/home/volumio/Quadify/DSEG7Classic-Light.ttf"
-        alt_font_path = "/home/volumio/Quadify/OpenSans-Regular.ttf"
-        try:
-            self.large_font = ImageFont.truetype(font_path, 45)
-            self.alt_font_medium = ImageFont.truetype(alt_font_path, 18)
-            self.alt_font = ImageFont.truetype(alt_font_path, 12)
-        except IOError:
-            print("Font file not found. Please check the font paths.")
-            exit()
-
-        self.icons = {}
-        services = ["favourites", "nas", "playlists", "qobuz", "tidal", "webradio", "mpd", "default"]
-        icon_dir = "/home/volumio/Quadify/icons"
-        for service in services:
-            try:
-                icon_path = os.path.join(icon_dir, f"{service}.bmp")
-                self.icons[service] = Image.open(icon_path).convert("RGB").resize((40, 40))
-            except IOError:
-                print(f"Icon for {service} not found. Please check the path.")
-
-        self.webradio = WebRadio(self.device, self.alt_font, self.alt_font_medium)
-
-    def get_volumio_data(self):
-        try:
-            response = requests.get(self.VOL_API_URL)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                print(f"Failed to connect to Volumio. Status code: {response.status_code}")
-        except requests.RequestException as e:
-            print(f"Error fetching data from Volumio: {e}")
-        return None
-
-    def get_text_dimensions(self, text, font):
-        bbox = font.getbbox(text)
-        width = bbox[2] - bbox[0]
-        height = bbox[3] - bbox[1]
-        return width, height
-
-    def draw_display(self, data):
-        current_service = data.get("service", "default").lower()
-        
-        # Clear the display if the service has changed
-        if current_service != self.previous_service:
-            self.device.clear()
-            self.previous_service = current_service
-
-        # Create an image to draw on
-        image = Image.new("RGB", (self.device.width, self.device.height), "black")
-        draw = ImageDraw.Draw(image)
-
-        # Draw volume indicator
-        volume = max(0, min(int(data.get("volume", 0)), 100))
-        filled_squares = round((volume / 100) * 6)
-        square_size = 4
-        row_spacing = 4
-        padding_bottom = 12
-        columns = [8, 28]
-
-        for x in columns:
-            for row in range(6):
-                y = self.device.height - padding_bottom - ((row + 1) * (square_size + row_spacing))
-                if row < filled_squares:
-                    draw.rectangle([x, y, x + square_size, y + square_size], fill="white")
-                else:
-                    draw.rectangle([x, y, x + square_size, y + square_size], outline="white")
-
-        # Draw specific content based on service type
-        if current_service == "webradio":
-            # Use WebRadio class to handle web radio specific display
-            self.webradio.draw(draw, data, image)
-        else:
-            # Display sample rate and bit depth for other services
-            sample_rate = data.get("samplerate", "0 KHz")
-            sample_rate_value, sample_rate_unit = sample_rate.split() if ' ' in sample_rate else (sample_rate, "")
-
-            try:
-                sample_rate_value = str(int(float(sample_rate_value)))
-            except ValueError:
-                sample_rate_value = "0"
-
-            # Position sample rate in the center
-            sample_rate_width, _ = self.get_text_dimensions(sample_rate_value, self.large_font)
-            sample_rate_x = self.device.width / 2 - sample_rate_width / 2
-            sample_rate_y = 26
-            unit_x = sample_rate_x + sample_rate_width - 25
-            unit_y = sample_rate_y + 19
-
-            # Draw text for sample rate and unit
-            draw.text((sample_rate_x, sample_rate_y), sample_rate_value, font=self.large_font, fill="white", anchor="mm")
-            draw.text((unit_x, unit_y), sample_rate_unit, font=self.alt_font, fill="white", anchor="lm")
-
-            # Display audio format and bit depth
-            audio_format = data.get("trackType", "Unknown")
-            bitdepth = data.get("bitdepth") or "N/A"
-            format_bitdepth_text = f"{audio_format}/{bitdepth}"
-            draw.text((210, 45), format_bitdepth_text, font=self.alt_font, fill="white", anchor="mm")
-
-            # Display the icon based on service type
-            icon = self.icons.get(current_service, self.icons["default"])
-            image.paste(icon, (185, 0))
-
-        # Display the final image on the OLED screen
-        self.device.display(image)
+class MockClock:
+    def __init__(self):
+        self.running = False  # Default value for running status
 
     def start(self):
-        if not self.running:
-            self.running = True
-            self.update_thread = threading.Thread(target=self.update_display)
-            self.update_thread.start()
-            print("Playback mode started.")
+        self.running = True
 
     def stop(self):
-        if self.running:
-            self.running = False
-            if self.update_thread:
-                self.update_thread.join()
-            if self.mode_manager:
-                self.mode_manager.clear_screen()
-            print("Playback mode stopped and screen cleared.")
+        self.running = False
 
-    def update_display(self):
-        while self.running:
-            data = self.get_volumio_data()
-            if data:
-                self.draw_display(data)
-            else:
-                print("No data received from Volumio.")
-            time.sleep(1)
+class TestModeManager(unittest.TestCase):
 
-# Main Execution
-if __name__ == "__main__":
-    try:
-        serial = spi(device=0, port=0)
-        device = ssd1322(serial, rotate=2)
-        playback = Playback(device, state={}, mode_manager=None)
-        playback.start()
-        print("Press Ctrl+C to exit.")
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        playback.stop()
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        playback.stop()
+    def setUp(self):
+        """Set up a new instance of ModeManager for each test."""
+        self.mock_oled = MockOLED()
+        self.mock_clock = MockClock()
+        self.mode_manager = ModeManager(self.mock_oled, self.mock_clock)
+
+    def test_playback_mode(self):
+        """Test that playback mode is correctly set when state is play and service is playback."""
+        state = {
+            "status": "play",
+            "service": "music"
+        }
+        self.mode_manager.process_state_change(state)
+        self.assertEqual(self.mode_manager.current_mode, "playback")
+
+    def test_webradio_mode(self):
+        """Test that webradio mode is correctly set when state is play and service is webradio."""
+        state = {
+            "status": "play",
+            "service": "webradio"
+        }
+        self.mode_manager.process_state_change(state)
+        self.assertEqual(self.mode_manager.current_mode, "webradio")
+
+    def test_clock_mode_transition_after_stop(self):
+        """Test that clock mode is correctly set after stop delay timer completes."""
+        state = {
+            "status": "stop",
+            "service": ""
+        }
+        # Set up initial playback mode to simulate real usage
+        self.mode_manager.current_mode = "playback"
+        
+        # Process stop state and wait for the delay to transition to clock mode
+        self.mode_manager.process_state_change(state)
+        
+        # Wait for stop_delay_timer to trigger
+        if self.mode_manager.stop_delay_timer:
+            self.mode_manager.stop_delay_timer.join()
+        
+        self.assertEqual(self.mode_manager.current_mode, "clock")
+
+    def test_no_redundant_mode_changes(self):
+        """Test that no redundant mode changes occur (no flickering or duplicate mode)."""
+        state = {
+            "status": "play",
+            "service": "webradio"
+        }
+        
+        # Set mode to webradio initially
+        self.mode_manager.set_mode("webradio", playback_state=state)
+        initial_mode = self.mode_manager.current_mode
+        
+        # Process the same state again
+        self.mode_manager.process_state_change(state)
+        
+        # Mode should still be webradio with no change
+        self.assertEqual(initial_mode, self.mode_manager.current_mode)
+
+    def test_transition_from_webradio_to_clock(self):
+        """Test transitioning from webradio to clock mode smoothly after stopping."""
+        # Set initial state to webradio
+        state_play = {
+            "status": "play",
+            "service": "webradio"
+        }
+        self.mode_manager.process_state_change(state_play)
+        self.assertEqual(self.mode_manager.current_mode, "webradio")
+        
+        # Now simulate stop state
+        state_stop = {
+            "status": "stop",
+            "service": ""
+        }
+        self.mode_manager.process_state_change(state_stop)
+
+        # Wait for stop_delay_timer to complete
+        if self.mode_manager.stop_delay_timer:
+            self.mode_manager.stop_delay_timer.join()
+
+        # Verify that it switches to clock
+        self.assertEqual(self.mode_manager.current_mode, "clock")
+
+if __name__ == '__main__':
+    unittest.main()
