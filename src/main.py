@@ -10,21 +10,22 @@ from PIL import Image, ImageDraw, ImageSequence
 import sys
 import requests
 import RPi.GPIO as GPIO
-from playback import Playback
-from clock import Clock
-from volumio_listener import VolumioListener
-from rotary import RotaryControl
-from mode_Manager import ModeManager
-from menus import PlaylistManager, RadioManager
-from menu_manager import MenuManager
-from buttonsleds import ButtonsLEDController
+from display.playback import Playback
+from display.clock import Clock
+from network.volumio_listener import VolumioListener
+from controls.rotary_control import RotaryControl
+from managers.mode_manager import ModeManager
+from managers.playlist_manager import PlaylistManager
+from managers.radio_manager import RadioManager
+from managers.menu_manager import MenuManager
+from hardware.buttonsleds import ButtonsLEDController
 
 GPIO.setwarnings(False)
 
 volumioIO = socketio.Client(logger=True, engineio_logger=True)
 volumioIO.connect('http://localhost:3000', namespaces=['/'])
 
-LOADING_GIF_PATH = "/home/volumio/Quadify/Loading.gif"
+LOADING_GIF_PATH = "/home/volumio/Quadifyclean/src/assets/images/Loading.gif"
 
 # Timers
 LOGO_DISPLAY_TIME = 5
@@ -121,7 +122,7 @@ def show_loading_gif(device, gif_path=LOADING_GIF_PATH, display_duration=0.1):
 
 # Display the boot logo
 def display_boot_logo(device):
-    logo_path = "/home/volumio/Quadify/logo.bmp"
+    logo_path = "/home/volumio/Quadifyclean/src/assets/images/logo.bmp"
     try:
         logo = Image.open(logo_path).convert(device.mode).resize((device.width, device.height))
         device.display(logo)

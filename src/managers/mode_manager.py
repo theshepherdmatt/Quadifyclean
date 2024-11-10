@@ -2,8 +2,8 @@ import time
 import threading
 import RPi.GPIO as GPIO
 from PIL import Image
-from playback import Playback
-from menus import PlaylistManager
+from display.playback import Playback
+from managers.playlist_manager import PlaylistManager
 
 last_button_press_time = 0  # Initialize button press debounce timer
 

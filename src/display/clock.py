@@ -5,8 +5,8 @@ from PIL import Image, ImageDraw, ImageFont
 class Clock:
     def __init__(self, device):
         # Load fonts for the clock display
-        font_path = "/home/volumio/Quadify/fonts/DSEG7Classic-Light.ttf"
-        alt_font_path = "/home/volumio/Quadify/fonts/OpenSans-Regular.ttf"
+        font_path = "/home/volumio/Quadifyclean/src/assets/fonts/DSEG7Classic-Light.ttf"
+        alt_font_path = "/home/volumio/Quadifyclean/src/assets/fonts/OpenSans-Regular.ttf"
         try:
             self.clock_large_font = ImageFont.truetype(font_path, 35)
             self.clock_small_font = ImageFont.truetype(alt_font_path, 12)

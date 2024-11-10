@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw, ImageFont
 class MenuManager:
     def __init__(self, oled, volumio_listener, mode_manager):
         self.oled = oled
-        self.font_path = "/home/volumio/Quadify/fonts/OpenSans-Regular.ttf"
+        self.font_path = "/home/volumio/Quadify/src/assets/fonts/OpenSans-Regular.ttf"
         try:
             self.font = ImageFont.truetype(self.font_path, 12)
         except IOError:

@@ -10,7 +10,7 @@ from io import BytesIO
 
 
 class WebRadio:
-    def __init__(self, device, alt_font, alt_font_medium, local_album_art_path="/home/volumio/Quadify/icons/webradio.bmp"):
+    def __init__(self, device, alt_font, alt_font_medium, local_album_art_path="/home/volumio/Quadifyclean/src/assets/images/webradio.bmp"):
         self.device = device
         self.alt_font = alt_font
         self.alt_font_medium = alt_font_medium
@@ -77,8 +77,8 @@ class Playback:
         self.socketIO = socketio.Client(logger=True, engineio_logger=True)
         self.socketIO.connect(f'http://{self.host}:{self.port}', namespaces=['/'])
         
-        font_path = "/home/volumio/Quadify/fonts/DSEG7Classic-Light.ttf"
-        alt_font_path = "/home/volumio/Quadify/fonts/OpenSans-Regular.ttf"
+        font_path = "/home/volumio/Quadifyclean/src/assets/fonts/DSEG7Classic-Light.ttf"
+        alt_font_path = "/home/volumio/Quadifyclean/src/assets/fonts/OpenSans-Regular.ttf"
         try:
             self.large_font = ImageFont.truetype(font_path, 45)
             self.alt_font_medium = ImageFont.truetype(alt_font_path, 18)
@@ -89,7 +89,7 @@ class Playback:
 
         self.icons = {}
         services = ["favourites", "nas", "playlists", "qobuz", "tidal", "webradio", "mpd", "default"]
-        icon_dir = "/home/volumio/Quadify/icons"
+        icon_dir = "/home/volumio/Quadifyclean/src/assets/images"
         for service in services:
             try:
                 icon_path = os.path.join(icon_dir, f"{service}.bmp")
