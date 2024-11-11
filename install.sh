@@ -74,6 +74,20 @@ install_dependencies() {
 }
 pip3 install websocket-client
 
+pip3 install transitions
+
+dependency-injector
+blinker
+socketIO-client
+luma.oled
+RPi.GPIO
+PIL
+transitions
+pytest
+flake8
+pylint
+
+
 
 # ============================
 #   Enable I2C and SPI in userconfig.txt
