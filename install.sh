@@ -9,7 +9,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 MAGENTA='\033[0;35m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
 # ============================
 #   ASCII Art Banner Function
@@ -49,58 +49,105 @@ check_root() {
 }
 
 # ============================
-#   Install Python Packages
+#   Install System-Level Dependencies
 # ============================
-install_dependencies() {
-    log_message "info" "Checking for pip3 installation..."
-    if ! command -v pip3 &> /dev/null; then
-        log_message "warning" "pip3 not found. Attempting to install pip3..."
-        apt-get update
-        apt-get install -y python3-pip
-        if ! command -v pip3 &> /dev/null; then
-            log_message "error" "pip3 installation failed. Please install it manually."
-            exit 1
-        fi
-        log_message "success" "pip3 installed successfully."
+install_system_dependencies() {
+    log_message "info" "Installing system-level dependencies..."
+
+    # Update package lists
+    apt-get update
+
+    # Install essential packages
+    apt-get install -y \
+        python3.10 \
+        python3.10-venv \
+        python3.10-dev \
+        python3-pip \
+        libjpeg-dev \
+        zlib1g-dev \
+        libfreetype6-dev \
+        i2c-tools \
+        python3-smbus \
+        libgirepository1.0-dev \
+        pkg-config \
+        libcairo2-dev \
+        libffi-dev \
+        build-essential \
+        libxml2-dev \
+        libxslt1-dev \
+        libssl-dev
+
+    log_message "success" "System-level dependencies installed successfully."
+}
+
+# ============================
+#   Create and Activate Virtual Environment
+# ============================
+setup_virtualenv() {
+    log_message "info" "Setting up Python virtual environment..."
+
+    # Navigate to project directory
+    cd ~/Quadifyclean/
+
+    # Create virtual environment if it doesn't exist
+    if [ ! -d "venv" ]; then
+        python3.10 -m venv venv
+        log_message "success" "Virtual environment created."
     else
-        log_message "success" "pip3 is already installed."
+        log_message "info" "Virtual environment already exists."
     fi
 
-    log_message "info" "Installing required system libraries for Pillow and smbus..."
-    apt-get install -y libjpeg-dev zlib1g-dev libfreetype6-dev i2c-tools python3-smbus
-
-    log_message "info" "Installing required Python libraries..."
-    pip3 install luma.core==2.4.2 luma.oled==3.13.0 python-socketio==4.6.1 RPi.GPIO==0.7.0 Pillow smbus2
+    # Activate virtual environment
+    source venv/bin/activate
+    log_message "success" "Virtual environment activated."
 }
-pip3 install websocket-client
-
-pip3 install transitions
-
-dependency-injector
-blinker
-socketIO-client
-luma.oled
-RPi.GPIO
-PIL
-transitions
-pytest
-flake8
-pylint
-
-
 
 # ============================
-#   Enable I2C and SPI in userconfig.txt
+#   Upgrade pip, setuptools, and wheel
+# ============================
+upgrade_pip() {
+    log_message "info" "Upgrading pip, setuptools, and wheel..."
+    pip install --upgrade pip setuptools wheel
+    log_message "success" "pip, setuptools, and wheel upgraded."
+}
+
+# ============================
+#   Install Python Dependencies
+# ============================
+install_python_dependencies() {
+    log_message "info" "Installing Python dependencies..."
+
+    # Install dependencies from requirements.txt
+    pip install -r ~/Quadifyclean/requirements.txt
+
+    log_message "success" "Python dependencies installed successfully."
+}
+
+# ============================
+#   Enable I2C and SPI in config.txt
 # ============================
 enable_i2c_spi() {
-    log_message "info" "Enabling I2C and SPI in userconfig.txt..."
-    if ! grep -q "dtparam=spi=on" /boot/userconfig.txt; then
-        echo "dtparam=spi=on" | sudo tee -a /boot/userconfig.txt > /dev/null
+    log_message "info" "Enabling I2C and SPI in config.txt..."
+
+    CONFIG_FILE="/boot/config.txt"
+
+    # Enable SPI
+    if ! grep -q "^dtparam=spi=on" "$CONFIG_FILE"; then
+        echo "dtparam=spi=on" >> "$CONFIG_FILE"
+        log_message "success" "SPI enabled."
+    else
+        log_message "info" "SPI is already enabled."
     fi
-    if ! grep -q "dtparam=i2c=on" /boot/userconfig.txt; then
-        echo "dtparam=i2c=on" | sudo tee -a /boot/userconfig.txt > /dev/null
+
+    # Enable I2C
+    if ! grep -q "^dtparam=i2c_arm=on" "$CONFIG_FILE"; then
+        echo "dtparam=i2c_arm=on" >> "$CONFIG_FILE"
+        log_message "success" "I2C enabled."
+    else
+        log_message "info" "I2C is already enabled."
     fi
-    log_message "success" "I2C and SPI enabled in userconfig.txt."
+
+    log_message "success" "I2C and SPI enabled in config.txt."
 }
 
 # ============================
@@ -108,7 +155,10 @@ enable_i2c_spi() {
 # ============================
 detect_i2c_address() {
     log_message "info" "Detecting MCP23017 I2C address..."
-    address=$(i2cdetect -y 1 | grep -oE '20|21|22|23|24|25|26|27' | head -n 1)
+
+    # Use i2cdetect to find MCP23017 (common addresses: 0x20 - 0x27)
+    address=$(i2cdetect -y 1 | grep -E '20|21|22|23|24|25|26|27' | awk '{print $1}' | head -n 1)
+
     if [[ -z "$address" ]]; then
         log_message "warning" "MCP23017 not found. Check wiring and connections as per instructions on our website."
     else
@@ -123,11 +173,13 @@ detect_i2c_address() {
 update_buttonsleds_address() {
     local detected_address="$1"
     BUTTONSLEDS_FILE="/home/volumio/Quadify/buttonsleds.py"
+
     if [[ -f "$BUTTONSLEDS_FILE" ]]; then
-        sed -i "s/MCP23017_ADDRESS = 0x[0-9a-f][0-9a-f]/MCP23017_ADDRESS = 0x$detected_address/" "$BUTTONSLEDS_FILE"
+        sed -i "s/MCP23017_ADDRESS = 0x[0-9a-fA-F][0-9a-fA-F]/MCP23017_ADDRESS = 0x$detected_address/" "$BUTTONSLEDS_FILE"
         log_message "success" "Updated MCP23017 address in buttonsleds.py to 0x$detected_address."
     else
-        log_message "error" "buttonsleds.py not found. Ensure the path is correct."
+        log_message "error" "buttonsleds.py not found at $BUTTONSLEDS_FILE. Ensure the path is correct."
+        exit 1
     fi
 }
 
@@ -136,26 +188,34 @@ update_buttonsleds_address() {
 # ============================
 setup_main_service() {
     log_message "info" "Setting up the Main Quadify Service..."
-    tee /etc/systemd/system/quadify.service > /dev/null <<EOL
+
+    SERVICE_FILE="/etc/systemd/system/quadify.service"
+
+    tee "$SERVICE_FILE" > /dev/null <<EOL
 [Unit]
 Description=Quadify Main Service
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /home/volumio/Quadify/main.py
+ExecStart=/home/volumio/Quadifyclean/venv/bin/python3 /home/volumio/Quadifyclean/src/main.py
 Restart=always
 User=volumio
-WorkingDirectory=/home/volumio/Quadify
-Environment=PATH=/usr/bin:/usr/local/bin
+WorkingDirectory=/home/volumio/Quadifyclean/
+Environment=PATH=/home/volumio/Quadifyclean/venv/bin
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOL
+
+    # Reload systemd daemon to recognize the new service
     systemctl daemon-reload
+
+    # Enable and start the service
     systemctl enable quadify.service
     systemctl start quadify.service
+
     log_message "success" "Main Quadify Service has been created, enabled, and started."
 }
 
@@ -165,8 +225,11 @@ EOL
 main() {
     banner
     check_root
+    install_system_dependencies
     enable_i2c_spi
-    install_dependencies
+    setup_virtualenv
+    upgrade_pip
+    install_python_dependencies
     detect_i2c_address
     setup_main_service
     log_message "success" "Installation complete. Please reboot to apply hardware settings if necessary."

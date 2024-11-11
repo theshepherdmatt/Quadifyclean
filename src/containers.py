@@ -1,5 +1,5 @@
 # src/containers.py
-from src.utils.config_loader import load_config
+from utils.config_loader import load_config
 from dependency_injector import containers, providers
 from src.network.volumio_listener import VolumioListener
 from src.display.display_manager import DisplayManager

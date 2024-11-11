@@ -10,8 +10,8 @@ from src.commands.volume_up_command import VolumeUpCommand
 from src.commands.volume_down_command import VolumeDownCommand
 from src.commands.command_invoker import CommandInvoker
 from src.network.volumio_listener import VolumioListener
-from src.utils.service_locator import ServiceLocator
-from src.utils.config_loader import load_config
+from utils.service_locator import ServiceLocator
+from utils.config_loader import load_config
 from luma.oled.device import ssd1322
 from luma.core.interface.serial import spi
 import RPi.GPIO as GPIO
