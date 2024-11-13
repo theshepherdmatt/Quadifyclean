@@ -1,9 +1,19 @@
 # src/managers/mode_manager.py
+
 from transitions import Machine
 import threading
+import logging
 
 class ModeManager:
-    states = ['clock', 'playback', 'menu', 'webradio', 'playlist', 'favourites', 'tidal']
+    states = [
+        {'name': 'clock', 'on_enter': 'enter_clock'},
+        {'name': 'playback', 'on_enter': 'enter_playback'},
+        {'name': 'menu', 'on_enter': 'enter_menu'},
+        {'name': 'webradio', 'on_enter': 'enter_webradio'},
+        {'name': 'playlist', 'on_enter': 'enter_playlist'},
+        {'name': 'favourites', 'on_enter': 'enter_favourites'},
+        {'name': 'tidal', 'on_enter': 'enter_tidal'},
+    ]
 
     def __init__(self, display_manager, clock, playback, menu_manager, playlist_manager, radio_manager, tidal_manager):
         self.display_manager = display_manager
@@ -14,58 +24,77 @@ class ModeManager:
         self.radio_manager = radio_manager
         self.tidal_manager = tidal_manager
 
-        self.machine = Machine(model=self, states=ModeManager.states, initial='clock')
+        # Set up logging
+        self.logger = logging.getLogger(self.__class__.__name__)
+        logging.basicConfig(level=logging.DEBUG)
 
-        # Define transitions
-        self.machine.add_transition(trigger='to_playback', source='*', dest='playback', before='enter_playback')
-        self.machine.add_transition(trigger='to_menu', source='*', dest='menu', before='enter_menu')
-        self.machine.add_transition(trigger='to_webradio', source='*', dest='webradio', before='enter_webradio')
-        self.machine.add_transition(trigger='to_playlist', source='*', dest='playlist', before='enter_playlist')
-        self.machine.add_transition(trigger='to_favourites', source='*', dest='favourites', before='enter_favourites')
-        self.machine.add_transition(trigger='to_tidal', source='*', dest='tidal', before='enter_tidal')
-        self.machine.add_transition(trigger='to_clock', source='*', dest='clock', before='enter_clock')
+        self.machine = Machine(
+            model=self,
+            states=ModeManager.states,
+            initial='clock',
+            auto_transitions=False
+        )
+
+        # Define transitions without 'before' since 'on_enter' handles method calls
+        self.machine.add_transition(trigger='to_playback', source='*', dest='playback')
+        self.machine.add_transition(trigger='to_menu', source='*', dest='menu')
+        self.machine.add_transition(trigger='to_webradio', source='*', dest='webradio')
+        self.machine.add_transition(trigger='to_playlist', source='*', dest='playlist')
+        self.machine.add_transition(trigger='to_favourites', source='*', dest='favourites')
+        self.machine.add_transition(trigger='to_tidal', source='*', dest='tidal')
+        self.machine.add_transition(trigger='to_clock', source='*', dest='clock')
 
         self.on_mode_change_callbacks = []
         self.lock = threading.Lock()
 
-    # Define enter methods
-    def enter_playback(self):
+        # Explicitly call 'enter_clock' to ensure initial state is set
+        self.enter_clock()
+
+    # Define enter methods with 'event' parameter
+    def enter_playback(self, event=None):
+        self.logger.debug("Entering playback mode.")
         self.clock.stop()
         self.menu_manager.stop_mode()
         self.playback.start()
         self.notify_mode_change('playback')
 
-    def enter_menu(self):
+    def enter_menu(self, event=None):
+        self.logger.debug("Entering menu mode.")
         self.clock.stop()
         self.playback.stop()
         self.menu_manager.start_mode()
         self.notify_mode_change('menu')
 
-    def enter_webradio(self):
+    def enter_webradio(self, event=None):
+        self.logger.debug("Entering webradio mode.")
         self.clock.stop()
         self.playback.stop()
         self.radio_manager.start_mode()
         self.notify_mode_change('webradio')
 
-    def enter_playlist(self):
+    def enter_playlist(self, event=None):
+        self.logger.debug("Entering playlist mode.")
         self.clock.stop()
         self.playback.stop()
         self.playlist_manager.start_mode()
         self.notify_mode_change('playlist')
 
-    def enter_favourites(self):
+    def enter_favourites(self, event=None):
+        self.logger.debug("Entering favourites mode.")
         self.clock.stop()
         self.playback.stop()
-        # Implement favourites mode
+        # Implement favourites mode logic here
         self.notify_mode_change('favourites')
 
-    def enter_tidal(self):
+    def enter_tidal(self, event=None):
+        self.logger.debug("Entering tidal mode.")
         self.clock.stop()
         self.playback.stop()
         self.tidal_manager.start_mode()
         self.notify_mode_change('tidal')
 
-    def enter_clock(self):
+    def enter_clock(self, event=None):
+        self.logger.debug("Entering clock mode.")
         self.playback.stop()
         self.menu_manager.stop_mode()
         self.radio_manager.stop_mode()
@@ -76,6 +105,7 @@ class ModeManager:
 
     def process_state_change(self, state):
         status = state.get("status", "")
+        self.logger.debug(f"Processing state change with status: {status}")
         if status == "play":
             self.to_playback()
         elif status in ["pause", "stop"]:
@@ -85,15 +115,21 @@ class ModeManager:
         with self.lock:
             if callable(callback):
                 self.on_mode_change_callbacks.append(callback)
-                print(f"ModeManager: Added mode change callback: {callback}")
+                self.logger.debug(f"Added mode change callback: {callback}")
 
     def notify_mode_change(self, current_mode):
         with self.lock:
+            self.logger.debug(f"Notifying mode change to: {current_mode}")
             for callback in self.on_mode_change_callbacks:
                 try:
+                    self.logger.debug(f"Invoking callback: {callback}")
                     callback(current_mode)
                 except Exception as e:
-                    print(f"ModeManager: Error in callback {callback}: {e}")
+                    self.logger.error(f"ModeManager: Error in callback {callback}: {e}")
 
     def get_mode(self):
         return self.state
+
+    def stop(self):
+        """Optional: Method to clean up if needed."""
+        pass

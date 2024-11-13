@@ -17,7 +17,7 @@ class MenuManager(BaseManager):
 
     def stop_mode(self):
         self.is_active = False
-        self.clear_display()
+        self.display_manager.clear_display()  # Ensure this line exists
 
     def display_menu(self):
         def draw(draw_obj):

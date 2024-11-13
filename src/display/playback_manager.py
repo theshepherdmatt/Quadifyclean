@@ -29,7 +29,9 @@ class PlaybackManager(BaseManager):
     def stop_mode(self):
         self.is_active = False
         self.clear_display()
-        self.logger.debug("Playback mode stopped.")
+        self.display_manager.clear_display()
+        self.logger.debug("Playback mode stopped and clear_display called.")
+        print("Playback mode stopped and display cleared.")  # Debug statement
 
     def update_playback_state(self, state):
         with self.lock:
@@ -41,7 +43,8 @@ class PlaybackManager(BaseManager):
             elif status in ["pause", "stop"]:
                 if self.is_active:
                     self.stop_mode()
-            # Add more state handling as needed
+                    print("clear_display called from update_playback_state.")
+
 
     def update_current_track(self, track_info):
         with self.lock:
@@ -127,7 +130,10 @@ class PlaybackManager(BaseManager):
 
     def handle_mode_change(self, current_mode):
         if current_mode == "playback":
+            print("Switching to playback mode...")
             self.start_mode()
         else:
             if self.is_active:
+                print("Stopping playback mode from handle_mode_change...")
                 self.stop_mode()
+                print("clear_display has been called from handle_mode_change.")

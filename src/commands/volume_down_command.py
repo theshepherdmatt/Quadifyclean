@@ -1,5 +1,5 @@
 # src/commands/volume_down_command.py
-from base_command import BaseCommand
+from src.commands.base_command import BaseCommand
 
 class VolumeDownCommand(BaseCommand):
     def __init__(self, volumio_listener, decrement=5):

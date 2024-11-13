@@ -3,15 +3,13 @@ import time
 import threading
 import atexit
 from dependency_injector.wiring import inject, Provide
-from containers import Container
+from src.containers import Container
 from src.commands.play_command import PlayCommand
 from src.commands.pause_command import PauseCommand
 from src.commands.volume_up_command import VolumeUpCommand
 from src.commands.volume_down_command import VolumeDownCommand
 from src.commands.command_invoker import CommandInvoker
 from src.network.volumio_listener import VolumioListener
-from utils.service_locator import ServiceLocator
-from utils.config_loader import load_config
 from luma.oled.device import ssd1322
 from luma.core.interface.serial import spi
 import RPi.GPIO as GPIO
@@ -41,7 +39,7 @@ def main(
     container.config.from_yaml('config.yaml')
 
     # Initialize components
-    oled = container.oled_device()
+    #oled = container.oled_device()
     display_manager = container.display_manager()
     volumio_listener = container.volumio_listener()
     mode_manager = container.mode_manager()

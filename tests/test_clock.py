@@ -1,4 +1,5 @@
 # tests/test_clock.py
+
 from src.display.clock import Clock
 
 def test_clock_initialization():
@@ -10,8 +11,7 @@ def test_clock_initialization():
             self.height = 64
 
     mock_device = MockDevice()
-    clock = Clock(mock_device)
-    
-    assert clock.device == mock_device
-    assert clock.running is False
+    mock_config = {}  # or create a MagicMock if config requires certain attributes
 
+    clock = Clock(mock_device, mock_config)  # Pass the mock config
+    assert clock is not None

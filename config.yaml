@@ -1,0 +1,48 @@
+pins:
+  clk_pin: 13
+  dt_pin: 5
+  sw_pin: 6
+
+volumio:
+  host: localhost
+  port: 3000
+  api_url: "http://localhost:3000/api/v1"
+  connection_timeout: 5  # Timeout in seconds for Volumio API connection
+
+display:
+  icon_dir: "/home/volumio/Quadifyclean/src/assets/icons"
+  default_album_art: "/home/volumio/Quadifyclean/src/assets/icons/webradio.bmp"
+  loading_gif_path: "/home/volumio/Quadifyclean/src/assets/images/loading.gif"  # Path for loading screen GIF
+  logo_path: "/home/volumio/Quadifyclean/src/assets/images/logo.bmp"  # Path relative to project root
+  rotation: 2  # Set rotation if needed (0, 90, 180, 270)
+  brightness: 255  # Screen brightness (0-255)
+  contrast: 255  # Screen contrast (0-255)
+  fonts:
+    playback_large:
+      path: "DSEG7Classic-Light.ttf"
+      size: 45
+    playback_medium:
+      path: "OpenSans-Regular.ttf"
+      size: 18
+    playback_small:
+      path: "OpenSans-Regular.ttf"
+      size: 12
+    menu_font:
+      path: "OpenSans-Regular.ttf"
+      size: 18
+    clock_large:
+      path: "DSEG7Classic-Regular.ttf"
+      size: 60
+  refresh_rate: 60  # Display refresh rate in Hz
+  cache_images: true  # Cache frequently used images for faster access
+  preload_images:
+    - "/home/volumio/Quadifyclean/src/assets/icons/webradio.bmp"
+
+mcp23017_address: 0x20
+
+logging:
+  level: "DEBUG"  # Options: DEBUG, INFO, WARNING, ERROR
+  log_file: "/home/volumio/Quadifyclean/quadifyclean.log"
+  log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+

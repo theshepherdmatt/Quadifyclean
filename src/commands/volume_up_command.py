@@ -1,5 +1,5 @@
 # src/commands/volume_up_command.py
-from base_command import BaseCommand
+from src.commands.base_command import BaseCommand
 
 class VolumeUpCommand(BaseCommand):
     def __init__(self, volumio_listener, increment=5):

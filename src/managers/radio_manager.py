@@ -24,26 +24,30 @@ class RadioManager(BaseManager):
         self.is_active = True
         self.current_selection_index = 0
         if not self.radio_stations:
+            print("No radio stations available, displaying loading screen...")
             self.display_loading_screen()
             self.volumio_listener.fetch_webradio_stations()
         else:
+            print("Calling display_radio_stations in start_mode...")
             self.display_radio_stations()
+
 
     def stop_mode(self):
         self.is_active = False
         self.clear_display()
+        self.display_manager.clear_display()
 
     def update_radio_stations(self, stations):
         with self.lock:
             self.radio_stations = stations or []
             self.logger.debug(f"Updated radio stations: {[station['title'] for station in self.radio_stations]}")
-            if self.is_active:
-                if self.radio_stations:
-                    self.display_radio_stations()
-                else:
-                    self.display_no_stations()
+            if self.is_active and self.radio_stations:
+                self.display_radio_stations()
+            elif self.is_active:
+                self.display_no_stations()
 
     def display_radio_stations(self):
+        print("Displaying radio stations")
         def draw(draw_obj):
             y_offset = 10
             for i, station in enumerate(self.radio_stations):
@@ -55,7 +59,7 @@ class RadioManager(BaseManager):
                     fill="white" if i == self.current_selection_index else "gray"
                 )
         self.display_manager.draw_custom(draw)
-        self.logger.debug("Displayed radio stations.")
+        print("draw_custom called")
 
     def scroll_selection(self, direction):
         if not self.is_active:
@@ -93,7 +97,8 @@ class RadioManager(BaseManager):
 
     def handle_mode_change(self, current_mode):
         if current_mode == "webradio":
+            print("Starting webradio mode")
             self.start_mode()
-        else:
-            if self.is_active:
-                self.stop_mode()
+        elif self.is_active:
+            print("Stopping webradio mode")
+            self.stop_mode()

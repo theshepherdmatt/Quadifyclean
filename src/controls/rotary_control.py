@@ -3,50 +3,59 @@
 import RPi.GPIO as GPIO
 import time
 import logging
+import yaml
+from pathlib import Path
 
 class RotaryControl:
-    """
-    RotaryControl manages the rotary encoder hardware, detecting rotations and button presses.
-    It delegates actions to provided callbacks without handling business logic directly.
-    """
-
     LEFT = -1
     RIGHT = 1
 
     def __init__(
         self,
-        clk_pin=13,
-        dt_pin=5,
-        sw_pin=6,
+        config_path='config.yaml',
         debounce_delay=0.01,
         rotation_callback=None,
         button_callback=None
     ):
         """
-        Initializes the RotaryControl.
-
-        :param clk_pin: GPIO pin number for CLK.
-        :param dt_pin: GPIO pin number for DT.
-        :param sw_pin: GPIO pin number for SW (button).
-        :param debounce_delay: Time in seconds to debounce rotation events.
-        :param rotation_callback: Function to call on rotation. Receives direction as argument.
-        :param button_callback: Function to call on button press.
+        Initializes the RotaryControl, reading pin configuration from config.yaml.
         """
-        self.CLK_PIN = clk_pin
-        self.DT_PIN = dt_pin
-        self.SW_PIN = sw_pin
+        # Set up logger first to ensure it's available in all methods
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        self.debounce_delay = debounce_delay
         self.rotation_callback = rotation_callback
         self.button_callback = button_callback
-        self.debounce_delay = debounce_delay
+
+        # Load pins from config
+        self.CLK_PIN, self.DT_PIN, self.SW_PIN = self._load_pins(config_path)
 
         self.last_state = 0b11  # Initial state of (CLK, DT) as binary
         self.last_rotation_time = time.time()
         self.last_button_press_time = 0  # Initialize last button press time for debounce
 
-        self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.debug("Initializing RotaryControl.")
 
+        # Set up GPIO after loading pin configurations
         self.setup_gpio()
+
+    def _load_pins(self, config_path):
+        """Load CLK, DT, and SW pins from a YAML configuration file."""
+        config_file = Path(config_path)
+        if config_file.is_file():
+            with open(config_file, 'r') as f:
+                try:
+                    config = yaml.safe_load(f)
+                    pins = config.get('pins', {})
+                    return (
+                        pins.get('clk_pin', 13),
+                        pins.get('dt_pin', 5),
+                        pins.get('sw_pin', 6)
+                    )
+                except yaml.YAMLError as e:
+                    self.logger.error(f"Error reading config file: {e}")
+        self.logger.warning(f"Configuration file {config_path} not found or invalid. Using default pins.")
+        return 13, 5, 6
 
     def setup_gpio(self):
         """Sets up GPIO pins and event detection."""

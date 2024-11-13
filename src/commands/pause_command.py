@@ -1,5 +1,5 @@
 # src/commands/pause_command.py
-from base_command import BaseCommand
+from src.commands.base_command import BaseCommand
 
 class PauseCommand(BaseCommand):
     def __init__(self, volumio_listener):

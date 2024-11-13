@@ -11,6 +11,7 @@ class TidalManager(BaseManager):
         self.current_selection_index = 0
         self.font_key = 'menu_font'  # Define in config.yaml under fonts
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.mode_manager = mode_manager
         
         # Connect to VolumioListener signals
         self.volumio_listener.qobuz_playlists_received.connect(self.update_tidal_playlists)  # Assuming same signal for Tidal
