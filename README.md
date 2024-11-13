@@ -25,7 +25,7 @@ sudo apt-get update
 
 * Download source files (this repository).
 ```bash
-git clone https://github.com/theshepherdmatt/Quadify.git
+git clone https://github.com/theshepherdmatt/Quadifyclean.git
 ```
 
 * Enter the directory for Volumio
