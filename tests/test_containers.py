@@ -1,67 +1,97 @@
 # tests/test_containers.py
 
 import pytest
-from unittest.mock import MagicMock
-from dependency_injector import providers
-
-# Add the project root to sys.path if not already done
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from src.containers import Container
+from dependency_injector.providers import Configuration, Singleton, Factory
+from dependency_injector.errors import Error
 
 @pytest.fixture(scope="module")
 def container():
-    """
-    Fixture to set up and return a mocked Container instance.
-    """
     container = Container()
+    container.config.from_yaml("config.yaml")  # Ensure config.yaml path is correct or use a test-specific config
+    container.wire(modules=[__name__])
+    yield container
+    container.unwire()
 
-    # Configure the container with mock configuration
-    container.config.volumio.host.from_value('localhost')
-    container.config.volumio.port.from_value(3000)
-    container.config.buttons.debounce_delay.from_value(0.2)
-    container.config.pins.clk_pin.from_value(17)
-    container.config.pins.dt_pin.from_value(18)
-    container.config.pins.sw_pin.from_value(27)
+def test_container_initialization(container):
+    """Test that the container initializes without errors."""
+    assert isinstance(container.config, Configuration), "Config should be loaded as a Configuration instance."
+    assert isinstance(container.volumio_listener, Singleton), "VolumioListener should be a Singleton provider."
+    assert isinstance(container.playback_manager, Singleton), "PlaybackManager should be a Singleton provider."
+    assert isinstance(container.menu_manager, Singleton), "MenuManager should be a Singleton provider."
 
-    # Mock external dependencies
-    volumio_listener_mock = MagicMock()
-    display_manager_mock = MagicMock()
-    mode_manager_mock = MagicMock()
-    buttons_led_controller_mock = MagicMock()
-    rotary_control_mock = MagicMock()
-    clock_mock = MagicMock()
-    playback_manager_mock = MagicMock()
-    menu_manager_mock = MagicMock()
-    playlist_manager_mock = MagicMock()
-    radio_manager_mock = MagicMock()
-    tidal_manager_mock = MagicMock()
-    qobuz_manager_mock = MagicMock()
-    state_handler_mock = MagicMock()
+def test_volumio_listener_initialization(container):
+    """Test that VolumioListener initializes correctly."""
+    volumio_listener = container.volumio_listener()
+    assert volumio_listener is not None, "VolumioListener should not be None"
+    assert hasattr(volumio_listener, 'connect'), "VolumioListener should have a connect method"
+    assert volumio_listener.is_connected == False, "VolumioListener should start disconnected"
 
-    # Override providers with mocks
-    container.volumio_listener.override(providers.Object(volumio_listener_mock))
-    container.display_manager.override(providers.Object(display_manager_mock))
-    container.mode_manager.override(providers.Object(mode_manager_mock))
-    container.buttons_led_controller.override(providers.Factory(MagicMock))  # Correct Override
-    container.rotary_control.override(providers.Object(rotary_control_mock))
-    container.clock.override(providers.Object(clock_mock))
-    container.playback_manager.override(providers.Object(playback_manager_mock))
-    container.menu_manager.override(providers.Object(menu_manager_mock))
-    container.playlist_manager.override(providers.Object(playlist_manager_mock))
-    container.radio_manager.override(providers.Object(radio_manager_mock))
-    container.tidal_manager.override(providers.Object(tidal_manager_mock))
-    container.qobuz_manager.override(providers.Object(qobuz_manager_mock))
-    container.state_handler.override(providers.Object(state_handler_mock))
+def test_mode_manager_initialization(container):
+    """Test that ModeManager initializes and has the correct states."""
+    mode_manager = container.mode_manager()
+    assert mode_manager is not None, "ModeManager should not be None"
+    assert mode_manager.state == 'clock', "ModeManager should initialize with 'clock' state"
 
-    # Initialize resources
-    container.init_resources()
+def test_display_manager_initialization(container):
+    """Test that DisplayManager initializes and is configured correctly."""
+    display_manager = container.display_manager()
+    assert display_manager is not None, "DisplayManager should not be None"
+    assert hasattr(display_manager, 'show_logo'), "DisplayManager should have a show_logo method"
 
-    return container
+def test_playback_manager_initialization(container):
+    """Test that PlaybackManager initializes and depends on VolumioListener."""
+    playback_manager = container.playback_manager()
+    assert playback_manager is not None, "PlaybackManager should not be None"
+    assert playback_manager.volumio_listener is not None, "PlaybackManager should have access to VolumioListener"
 
-def test_buttons_led_controller_factory(container):
-    controller1 = container.buttons_led_controller()
-    controller2 = container.buttons_led_controller()
-    assert controller1 is not controller2, "ButtonsLEDController should be a factory and return new instances"
+def test_menu_manager_initialization(container):
+    """Test that MenuManager initializes and uses DisplayManager."""
+    menu_manager = container.menu_manager()
+    assert menu_manager is not None, "MenuManager should not be None"
+    assert menu_manager.display_manager is not None, "MenuManager should use DisplayManager"
+
+def test_rotary_control_initialization(container):
+    """Test that RotaryControl initializes and has callback functions."""
+    rotary_control = container.rotary_control()
+    assert rotary_control is not None, "RotaryControl should not be None"
+    assert callable(rotary_control.rotation_callback), "RotaryControl should have a rotation callback"
+    assert callable(rotary_control.button_callback), "RotaryControl should have a button callback"
+
+def test_buttons_led_controller_initialization(container):
+    """Test that ButtonsLEDController initializes correctly with required dependencies."""
+    button_led_controller = container.buttons_led_controller()
+    assert button_led_controller is not None, "ButtonsLEDController should not be None"
+    assert hasattr(button_led_controller, 'start'), "ButtonsLEDController should have a start method"
+
+def test_mode_transitions(container):
+    """Test that ModeManager can transition between states as expected."""
+    mode_manager = container.mode_manager()
+
+    # Transition to 'playback' mode
+    mode_manager.to_playback()
+    assert mode_manager.state == 'playback', "ModeManager should transition to 'playback' mode"
+
+    # Transition back to 'clock' mode
+    mode_manager.to_clock()
+    assert mode_manager.state == 'clock', "ModeManager should transition back to 'clock' mode"
+
+def test_configuration_loaded(container):
+    """Verify that configuration values are loaded into components."""
+    config = container.config
+    assert config.volumio.host() == "localhost", "Expected host to be 'localhost'"
+    assert config.volumio.port() == 3000, "Expected port to be 3000"
+    assert config.buttons.debounce_delay() == 0.1, "Expected debounce_delay to be 0.1 seconds"
+
+def test_cleanup(container):
+    """Ensure cleanup operations are properly set."""
+    rotary_control = container.rotary_control()
+    button_led_controller = container.buttons_led_controller()
+    
+    # Call cleanup methods
+    rotary_control.stop()
+    button_led_controller.stop()
+    
+    # Verify cleanup actions if applicable (or use mocks if necessary)
+    assert not rotary_control.rotation_callback, "RotaryControl's rotation_callback should be unset after stop"
+    assert not button_led_controller, "ButtonLEDController should clean up properly"

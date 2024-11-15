@@ -11,11 +11,19 @@ class Clock:
 
     def draw_clock(self):
         current_time = time.strftime("%H:%M")
+        font_key = 'clock_large'
+
+        # Check if the font is loaded in DisplayManager
+        if font_key not in self.display_manager.fonts:
+            print(f"Error: Font '{font_key}' not loaded in DisplayManager.")
+            return  # Exit the function if the font is not available
+
         self.display_manager.display_text(
             text=current_time,
-            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
-            font_key='clock_large'
+            position=(self.display_manager.oled.width // 4, self.display_manager.oled.height // 4),
+            font_key='clock_large'  # Ensure this matches the key in config.yaml
         )
+
 
     def start(self):
         if not self.running:

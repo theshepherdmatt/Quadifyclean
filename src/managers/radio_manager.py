@@ -11,43 +11,46 @@ class RadioManager(BaseManager):
         self.current_selection_index = 0
         self.font_key = 'menu_font'  # Define in config.yaml under fonts
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+        self.logger.setLevel(logging.INFO)  # Set to INFO or DEBUG as needed
+
         # Connect to VolumioListener signals
         self.volumio_listener.webradio_received.connect(self.update_radio_stations)
-        
+        self.logger.debug("Connected to VolumioListener's webradio_received signal.")
+
         # Register mode change callback
         self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
-        
+        self.logger.debug("Registered mode change callback.")
+
         self.lock = threading.Lock()
 
     def start_mode(self):
         self.is_active = True
         self.current_selection_index = 0
+        self.logger.info("RadioManager: Starting radio mode.")
         if not self.radio_stations:
-            print("No radio stations available, displaying loading screen...")
             self.display_loading_screen()
             self.volumio_listener.fetch_webradio_stations()
+            self.logger.info("RadioManager: Fetching radio stations.")
         else:
-            print("Calling display_radio_stations in start_mode...")
             self.display_radio_stations()
-
+            self.logger.info("RadioManager: Displaying existing radio stations.")
 
     def stop_mode(self):
         self.is_active = False
-        self.clear_display()
-        self.display_manager.clear_display()
+        self.display_manager.clear_screen()
+        self.logger.info("RadioManager: Stopped radio mode and cleared display.")
 
     def update_radio_stations(self, stations):
         with self.lock:
             self.radio_stations = stations or []
-            self.logger.debug(f"Updated radio stations: {[station['title'] for station in self.radio_stations]}")
+            self.logger.debug(f"RadioManager: Updated radio stations: {[station['title'] for station in self.radio_stations]}")
             if self.is_active and self.radio_stations:
                 self.display_radio_stations()
             elif self.is_active:
                 self.display_no_stations()
 
     def display_radio_stations(self):
-        print("Displaying radio stations")
+        self.logger.info("RadioManager: Displaying radio stations.")
         def draw(draw_obj):
             y_offset = 10
             for i, station in enumerate(self.radio_stations):
@@ -59,21 +62,23 @@ class RadioManager(BaseManager):
                     fill="white" if i == self.current_selection_index else "gray"
                 )
         self.display_manager.draw_custom(draw)
-        print("draw_custom called")
+        self.logger.debug("RadioManager: draw_custom called to display radio stations.")
 
     def scroll_selection(self, direction):
         if not self.is_active:
+            self.logger.debug("RadioManager: Scroll attempted while not active.")
             return
         with self.lock:
             self.current_selection_index = (self.current_selection_index + direction) % len(self.radio_stations)
             self.display_radio_stations()
-            self.logger.debug(f"Scrolled to radio station index: {self.current_selection_index}")
+            self.logger.debug(f"RadioManager: Scrolled to radio station index: {self.current_selection_index}")
 
     def select_item(self):
         if not self.is_active or not self.radio_stations:
+            self.logger.warning("RadioManager: Select attempted while inactive or no stations available.")
             return
         selected_station = self.radio_stations[self.current_selection_index]
-        self.logger.info(f"Selected radio station: {selected_station['title']}")
+        self.logger.info(f"RadioManager: Selected radio station: {selected_station['title']}")
         self.volumio_listener.play_webradio_station(
             title=selected_station['title'],
             uri=selected_station['uri']
@@ -85,7 +90,7 @@ class RadioManager(BaseManager):
             position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
             font_key='menu_font'
         )
-        self.logger.debug("Displayed loading screen for radio stations.")
+        self.logger.debug("RadioManager: Displayed loading screen for radio stations.")
 
     def display_no_stations(self):
         self.display_manager.display_text(
@@ -93,12 +98,12 @@ class RadioManager(BaseManager):
             position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
             font_key='menu_font'
         )
-        self.logger.warning("No radio stations available to display.")
+        self.logger.warning("RadioManager: No radio stations available to display.")
 
     def handle_mode_change(self, current_mode):
         if current_mode == "webradio":
-            print("Starting webradio mode")
+            self.logger.info("RadioManager: Switching to webradio mode.")
             self.start_mode()
         elif self.is_active:
-            print("Stopping webradio mode")
+            self.logger.info("RadioManager: Exiting webradio mode.")
             self.stop_mode()

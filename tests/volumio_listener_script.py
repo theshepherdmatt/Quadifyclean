@@ -1,78 +1,98 @@
-import time
-import logging
+import pytest
+from unittest.mock import MagicMock, patch, call
 from src.network.volumio_listener import VolumioListener
+from socketio import Client
 
-# Set up logging to display debug information
-logging.basicConfig(level=logging.DEBUG)
+@pytest.fixture
+def volumio_listener():
+    # Mock dependencies for VolumioListener
+    mock_socket_client = MagicMock(spec=Client)
+    return VolumioListener(socket_client=mock_socket_client)
 
-# Initialize the VolumioListener instance
-volumio_listener = VolumioListener()
+@patch('src.network.volumio_listener.Client')
+def test_connect(mock_socket_client_class, volumio_listener):
+    """
+    Test that the VolumioListener can successfully call connect on the socket client.
+    """
+    mock_socket_client_instance = mock_socket_client_class.return_value
+    volumio_listener.connect()
 
-# Helper function to listen for various signals
-def setup_signal_listeners():
-    volumio_listener.state_changed.connect(lambda sender, state: print(f"State changed: {state}"))
-    volumio_listener.playlists_received.connect(lambda sender, playlists: print(f"Playlists received: {playlists}"))
-    volumio_listener.webradio_received.connect(lambda sender, stations: print(f"Webradio stations received: {stations}"))
-    volumio_listener.tidal_playlists_received.connect(lambda sender, playlists: print(f"Tidal playlists received: {playlists}"))
-    volumio_listener.qobuz_playlists_received.connect(lambda sender, playlists: print(f"Qobuz playlists received: {playlists}"))
-    volumio_listener.track_changed.connect(lambda sender, track_info: print(f"Track changed: {track_info}"))
+    # Assert connect method was called with the expected arguments
+    mock_socket_client_instance.connect.assert_called_once_with('http://localhost:3000', transports=['websocket'])
+    print("test_connect: Success")
 
-# Set up signal listeners to capture and print events
-setup_signal_listeners()
+@patch('src.network.volumio_listener.Client')
+def test_emit_get_state(mock_socket_client_class, volumio_listener):
+    """
+    Test that the VolumioListener emits the "getState" event upon connecting.
+    """
+    mock_socket_client_instance = mock_socket_client_class.return_value
+    volumio_listener.connect()
 
-# Test functions
-def test_volumio_listener():
-    # Wait for initial connection
-    time.sleep(2)
+    # Verify that the getState event is emitted
+    mock_socket_client_instance.emit.assert_called_once_with("getState")
+    print("test_emit_get_state: Success")
 
-    # Fetch and display general playlists
-    print("\nFetching general playlists...")
-    volumio_listener.fetch_playlists()
-    time.sleep(3)  # Wait for response
+@patch('src.network.volumio_listener.Client')
+def test_register_event_handlers(mock_socket_client_class, volumio_listener):
+    """
+    Test that VolumioListener registers the expected event handlers.
+    """
+    mock_socket_client_instance = mock_socket_client_class.return_value
+    volumio_listener.connect()
 
-    # Fetch and display webradio stations
-    print("\nFetching webradio stations...")
-    volumio_listener.fetch_webradio_stations()
-    time.sleep(3)  # Wait for response
+    # Ensure appropriate handlers are registered for events
+    expected_calls = [
+        call('pushState', volumio_listener._handle_push_state),
+        call('pushMultiRoomDevices', volumio_listener._handle_multi_room_devices),
+        call('closeAllModals', volumio_listener._handle_close_all_modals)
+    ]
+    mock_socket_client_instance.on.assert_has_calls(expected_calls, any_order=True)
+    print("test_register_event_handlers: Success")
 
-    # Fetch and display Tidal playlists
-    print("\nFetching Tidal playlists...")
-    volumio_listener.fetch_tidal_playlists()
-    time.sleep(3)  # Wait for response
+def test_handle_push_state(volumio_listener):
+    """
+    Test the _handle_push_state method directly.
+    """
+    mock_callback = MagicMock()
+    volumio_listener.state_changed.connect(mock_callback)
 
-    # Fetch and display Qobuz playlists
-    print("\nFetching Qobuz playlists...")
-    volumio_listener.fetch_qobuz_playlists()
-    time.sleep(3)  # Wait for response
+    # Simulate a state change
+    test_state = {"status": "play", "artist": "Test Artist", "title": "Test Track"}
+    volumio_listener._handle_push_state(test_state)
 
-    # Test playing items from each category
-    print("\nAttempting to play specific items (examples)...")
-    time.sleep(1)
+    # Verify the callback was invoked with correct state
+    mock_callback.assert_called_once_with(test_state)
+    print("test_handle_push_state: Success")
 
-    # Play a sample playlist if available
-    sample_playlist = "Your Playlist Name Here"  # Replace with a valid playlist name
-    print(f"Playing playlist: {sample_playlist}")
-    volumio_listener.play_playlist(sample_playlist)
-    time.sleep(3)
+def test_handle_multi_room_devices(volumio_listener):
+    """
+    Test the _handle_multi_room_devices method directly.
+    """
+    mock_callback = MagicMock()
+    volumio_listener.multi_room_devices_received.connect(mock_callback)
 
-    # Play a sample webradio station if available
-    sample_webradio = {"title": "Sample Radio", "uri": "webradio://sample_uri"}  # Replace with actual station data
-    print(f"Playing webradio station: {sample_webradio['title']}")
-    volumio_listener.play_webradio_station(sample_webradio['title'], sample_webradio['uri'])
-    time.sleep(3)
+    # Simulate multi-room devices data
+    test_devices = [{"name": "Room1", "host": "http://192.168.0.10"}]
+    volumio_listener._handle_multi_room_devices(test_devices)
 
-    # Play a sample Tidal playlist if available
-    sample_tidal = {"title": "Sample Tidal Playlist", "uri": "tidal://sample_uri"}  # Replace with actual Tidal playlist data
-    print(f"Playing Tidal playlist: {sample_tidal['title']}")
-    volumio_listener.play_tidal_playlist(sample_tidal['title'], sample_tidal['uri'])
-    time.sleep(3)
+    # Verify the callback was invoked with correct devices list
+    mock_callback.assert_called_once_with(test_devices)
+    print("test_handle_multi_room_devices: Success")
 
-    # Play a sample Qobuz playlist if available
-    sample_qobuz = {"title": "Sample Qobuz Playlist", "uri": "qobuz://sample_uri"}  # Replace with actual Qobuz playlist data
-    print(f"Playing Qobuz playlist: {sample_qobuz['title']}")
-    volumio_listener.play_qobuz_playlist(sample_qobuz['title'], sample_qobuz['uri'])
-    time.sleep(3)
+def test_handle_close_all_modals(volumio_listener):
+    """
+    Test the _handle_close_all_modals method directly.
+    """
+    mock_callback = MagicMock()
+    volumio_listener.close_all_modals.connect(mock_callback)
 
-# Run the test
-test_volumio_listener()
+    # Simulate close all modals event
+    volumio_listener._handle_close_all_modals()
 
+    # Verify the callback was invoked
+    mock_callback.assert_called_once()
+    print("test_handle_close_all_modals: Success")
+
+if __name__ == "__main__":
+    pytest.main(["-v", "-s"])

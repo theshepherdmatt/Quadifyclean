@@ -1,174 +1,238 @@
-# src/main.py
+# File: src/main.py
+
 import time
 import threading
-import atexit
-from dependency_injector.wiring import inject, Provide
-from src.containers import Container
-from src.commands.play_command import PlayCommand
-from src.commands.pause_command import PauseCommand
-from src.commands.volume_up_command import VolumeUpCommand
-from src.commands.volume_down_command import VolumeDownCommand
-from src.commands.command_invoker import CommandInvoker
-from src.network.volumio_listener import VolumioListener
-from luma.oled.device import ssd1322
-from luma.core.interface.serial import spi
-import RPi.GPIO as GPIO
 import logging
+import yaml
+import os
+import sys
 
-def setup_logging():
+# Debugging: Print working and script directories, and check config.yaml existence
+print(f"Working directory: {os.getcwd()}")
+print(f"Script directory: {os.path.dirname(os.path.abspath(__file__))}")
+config_path_debug = '/home/volumio/Quadifyclean/config.yaml'
+print(f"Does config.yaml exist? {os.path.isfile(config_path_debug)}")
+
+# Importing components from the src directory
+from display.display_manager import DisplayManager
+from display.clock import Clock
+from display.playback_manager import PlaybackManager
+from managers.mode_manager import ModeManager
+from managers.manager_factory import ManagerFactory
+from controls.rotary_control import RotaryControl
+from network.volumio_listener import VolumioListener
+from hardware.buttonsleds import ButtonsLEDController
+from handlers.state_handler import StateHandler
+
+def load_config(config_path='/config.yaml'):
+    abs_path = os.path.abspath(config_path)
+    print(f"Attempting to load config from: {abs_path}")
+    print(f"Does the file exist? {os.path.isfile(config_path)}")  # Debug line
+    config = {}
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f) or {}
+            logging.debug(f"Configuration loaded from {config_path}.")
+        except yaml.YAMLError as e:
+            logging.error(f"Error loading config file {config_path}: {e}")
+    else:
+        logging.warning(f"Config file {config_path} not found. Using default configuration.")
+    return config
+
+def main():
+    # 1. Set up logging
     logging.basicConfig(
-        level=logging.DEBUG,  # Change to INFO or WARNING in production
+        level=logging.INFO,  # Changed from DEBUG to INFO to reduce verbosity
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler("quadifyclean.log"),
-            logging.StreamHandler()
+            logging.StreamHandler(sys.stdout)
         ]
     )
+    logger = logging.getLogger("Main")
 
-@inject
-def main(
-    container: Container = Provide[Container],
-    command_invoker: CommandInvoker = Provide[Container.command_invoker],
-):
-    # Setup logging
-    setup_logging()
-    logger = logging.getLogger('Main')
-    logger.info("Starting Quadifyclean Application")
+    # 2. Suppress logging from third-party libraries
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('socketio').setLevel(logging.WARNING)
+    logging.getLogger('engineio').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('blinker').setLevel(logging.WARNING)
+    logging.getLogger('transitions').setLevel(logging.WARNING)
 
-    # Load configuration
-    container.config.from_yaml('config.yaml')
+    # 3. Load configuration
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, '..', 'config.yaml')
+    config_path = os.path.abspath(config_path)  # Ensure it's an absolute path
+    print(f"Using config file path: {config_path}")
+    config = load_config(config_path)
 
-    # Initialize components
-    #oled = container.oled_device()
-    display_manager = container.display_manager()
-    volumio_listener = container.volumio_listener()
-    mode_manager = container.mode_manager()
-    menu_manager = container.menu_manager()
-    playlist_manager = container.playlist_manager()
-    radio_manager = container.radio_manager()
-    tidal_manager = container.tidal_manager()
-    qobuz_manager = container.qobuz_manager()
-    playback_manager = container.playback()
-    rotary_control = container.rotary_control()
-    button_led_controller = container.button_led_controller()
-    state_handler = container.state_handler()
+    # 4. Extract and pass display configuration to DisplayManager
+    display_config = config.get('display', {})
+    
+    # Debugging: Print the display config being passed
+    print("Display Config being passed to DisplayManager:", display_config)
+    logging.debug(f"Display Config being passed to DisplayManager: {display_config}")
 
-    # Register Volumio state change handler
-    def handle_volumio_state_change(state):
-        mode_manager.process_state_change(state)
+    print("Step 1: Initializing DisplayManager...")
+    display_manager = DisplayManager(display_config)
+    print("Step 1 complete: DisplayManager initialized.")
 
-    volumio_listener.state_changed.connect(handle_volumio_state_change)
+    # 5. Display startup logo and loading animation
+    logo_path = os.path.join(script_dir, 'assets/images/logo.bmp')
+    loading_gif_path = os.path.join(script_dir, 'assets/images/Loading.gif')
 
-    # Register playlists received handler
-    def handle_playlists_received(playlists):
-        playlist_manager.update_playlists(playlists)
+    print("Step 2: Displaying logo and loading animation...")
+    display_manager.display_image(logo_path, resize=True)
+    time.sleep(2)
+    display_manager.display_image(loading_gif_path, resize=True, timeout=2)
+    print("Step 2 complete: Displaying startup visuals.")
 
-    volumio_listener.playlists_received.connect(handle_playlists_received)
+    # 6. Initialize VolumioListener
+    volumio_config = config.get('volumio', {})
+    volumio_host = volumio_config.get('host', 'localhost')
+    volumio_port = volumio_config.get('port', 3000)
 
-    # Register webradio received handler
-    def handle_webradio_received(stations):
-        radio_manager.update_webradio_stations(stations)
+    print("Step 3: Initializing VolumioListener...")
+    volumio_listener = VolumioListener(host=volumio_host, port=volumio_port)
+    print("Step 3 complete: VolumioListener initialized.")
 
-    volumio_listener.webradio_received.connect(handle_webradio_received)
+    # 7. Initialize Clock
+    print("Step 4: Initializing Clock...")
+    clock = Clock(display_manager, display_config)  # Pass display_config if needed
+    print("Step 4 complete: Clock initialized.")
 
-    # Register Tidal playlists received handler
-    def handle_tidal_playlists_received(playlists):
-        tidal_manager.update_tidal_playlists(playlists)
+    # 8. Initialize PlaybackManager
+    print("Step 5: Initializing PlaybackManager...")
+    playback_manager = PlaybackManager(display_manager, volumio_listener, mode_manager=None)  # Ensure arguments match __init__
+    print("Step 5 complete: PlaybackManager initialized.")
 
-    volumio_listener.tidal_playlists_received.connect(handle_tidal_playlists_received)
+    # 9. Initialize ManagerFactory with DisplayManager and VolumioListener
+    print("Step 6: Initializing ManagerFactory...")
+    manager_factory = ManagerFactory(display_manager, volumio_listener, mode_manager=None)  # ModeManager will be set later
+    print("Step 6 complete: ManagerFactory initialized.")
 
-    # Register Qobuz playlists received handler
-    def handle_qobuz_playlists_received(playlists):
-        qobuz_manager.update_qobuz_playlists(playlists)
+    # 10. Initialize other managers using ManagerFactory
+    print("Step 7: Creating other managers...")
+    menu_manager = manager_factory.create_menu_manager()
+    playlist_manager = manager_factory.create_playlist_manager()
+    radio_manager = manager_factory.create_radio_manager()
+    tidal_manager = manager_factory.create_tidal_manager()
+    qobuz_manager = manager_factory.create_qobuz_manager()
+    print("Step 7 complete: Other managers created.")
 
-    volumio_listener.qobuz_playlists_received.connect(handle_qobuz_playlists_received)
+    # 11. Initialize ModeManager with all managers
+    print("Step 8: Initializing ModeManager...")
+    mode_manager = ModeManager(
+        display_manager=display_manager,
+        clock=clock,
+        playback_manager=playback_manager,
+        menu_manager=menu_manager,
+        playlist_manager=playlist_manager,
+        radio_manager=radio_manager,
+        tidal_manager=tidal_manager,
+        qobuz_manager=qobuz_manager
+    )
+    print("Step 8 complete: ModeManager initialized.")
 
-    # Register track changed handler
-    def handle_track_changed(track_info):
-        playback_manager.update_current_track(track_info)
+    # 12. Assign ModeManager to VolumioListener and other managers
+    print("Step 9: Assigning ModeManager to managers...")
+    volumio_listener.mode_manager = mode_manager
+    playback_manager.mode_manager = mode_manager
+    menu_manager.mode_manager = mode_manager
+    playlist_manager.mode_manager = mode_manager
+    radio_manager.mode_manager = mode_manager
+    tidal_manager.mode_manager = mode_manager
+    qobuz_manager.mode_manager = mode_manager
+    print("Step 9 complete: ModeManager assigned.")
 
-    volumio_listener.track_changed.connect(handle_track_changed)
+    # 13. Connect to Volumio after assigning ModeManager
+    print("Step 10: Connecting to Volumio...")
+    volumio_listener.connect()
+    print("Step 10 complete: Connected to Volumio.")
 
-    # Define button press callback
+    # 14. Initialize StateHandler
+    print("Step 11: Initializing StateHandler...")
+    state_handler = StateHandler(volumio_listener, mode_manager)
+    print("Step 11 complete: StateHandler initialized.")
+
+    # 15. Initialize ButtonsLEDController
+    print("Step 12: Initializing ButtonsLEDController...")
+    buttons_leds = ButtonsLEDController(
+        volumio_listener=volumio_listener,
+        config_path=config_path
+    )
+    buttons_leds.start()
+    print("Step 12 complete: ButtonsLEDController started.")
+
+    # 16. Define RotaryControl callbacks
+    def on_rotate(direction):
+        current_mode = mode_manager.get_mode()
+        logger.debug(f"Rotary rotated: {'RIGHT' if direction == 1 else 'LEFT'} in mode {current_mode}.")
+        if current_mode == 'menu':
+            menu_manager.scroll_selection(direction)
+        elif current_mode == 'webradio':
+            radio_manager.scroll_selection(direction)
+        elif current_mode == 'playlist':
+            playlist_manager.scroll_selection(direction)
+        elif current_mode == 'tidal':
+            tidal_manager.scroll_selection(direction)
+        elif current_mode == 'qobuz':
+            qobuz_manager.scroll_selection(direction)
+        elif current_mode == 'playback':
+            volume_change = 5 * direction  # Adjust volume by 5 units per rotation
+            playback_manager.adjust_volume(volume_change)
+
     def on_button_press():
         current_mode = mode_manager.get_mode()
-        logger.debug(f"Button pressed in mode: {current_mode}")
-        if current_mode == "menu":
+        logger.debug(f"Button pressed in mode {current_mode}.")
+        if current_mode == 'clock':
+            mode_manager.to_menu()
+        elif current_mode == 'menu':
             menu_manager.select_item()
-        elif current_mode == "playlist":
-            playlist_manager.select_item()
-        elif current_mode == "playback":
+        elif current_mode in ['webradio', 'playlist', 'favourites', 'tidal', 'qobuz']:
+            pass
+        elif current_mode == 'playback':
             playback_manager.toggle_play_pause()
-        elif current_mode == "webradio":
-            radio_manager.select_item()
-        elif current_mode == "tidal":
-            tidal_manager.select_item()
-        elif current_mode == "qobuz":
-            qobuz_manager.select_item()
-        # Add more mode-specific button actions as needed
 
-    # Define rotary encoder rotation callback
-    def on_rotation(direction):
-        current_mode = mode_manager.get_mode()
-        logger.debug(f"Rotary turned {'Clockwise' if direction > 0 else 'Counterclockwise'} in mode: {current_mode}")
-        if current_mode == "menu":
-            menu_manager.scroll_selection(direction)
-        elif current_mode == "playlist":
-            playlist_manager.scroll_selection(direction)
-        elif current_mode == "playback":
-            # Example: Volume control
-            if direction > 0:
-                cmd = VolumeUpCommand(volumio_listener=volumio_listener, increment=5)
-            else:
-                cmd = VolumeDownCommand(volumio_listener=volumio_listener, decrement=5)
-            command_invoker.execute_command(cmd)
-        elif current_mode == "webradio":
-            radio_manager.scroll_selection(direction)
-        elif current_mode == "tidal":
-            tidal_manager.scroll_selection(direction)
-        elif current_mode == "qobuz":
-            qobuz_manager.scroll_selection(direction)
-        # Add more mode-specific rotation actions as needed
+    # 17. Initialize RotaryControl
+    print("Step 13: Initializing RotaryControl...")
+    rotary_control = RotaryControl(
+        config_path=config_path,
+        rotation_callback=on_rotate,
+        button_callback=on_button_press
+    )
+    print("Step 13 complete: RotaryControl initialized.")
 
-    # Wire callbacks to RotaryControl
-    rotary_control.rotation_callback = on_rotation
-    rotary_control.button_callback = on_button_press
+    # 18. Start RotaryControl GPIO event detection in a separate thread
+    print("Step 14: Starting RotaryControl GPIO event detection...")
+    rotary_thread = threading.Thread(target=rotary_control.setup_gpio, daemon=True)
+    rotary_thread.start()
+    print("Step 14 complete: RotaryControl GPIO event detection started.")
 
-    # Initialize and start state handler
-    state_handler_instance = state_handler()
-    state_handler_instance.register_listeners()
+    # 19. Wait until VolumioListener is connected
+    logger.info("Waiting for Volumio to connect...")
+    while not volumio_listener.is_connected:
+        time.sleep(1)
+        logger.debug("Still waiting for Volumio to connect...")
 
-    # Initialize and start Volumio listener
-    volumio_listener.connect()
+    # 20. Set initial mode to Clock
+    print("Step 15: Setting initial mode to Clock...")
+    mode_manager.to_clock()
+    print("Step 15 complete: Initial mode set to Clock.")
 
-    # Start LED controller in a separate thread
-    def led_controller_thread():
-        button_led_controller.start()
-    
-    threading.Thread(target=led_controller_thread, daemon=True).start()
-
-    # Define cleanup function
-    def cleanup():
-        logger.info("Cleaning up resources...")
-        GPIO.cleanup()
-        rotary_control.stop()
-        button_led_controller.stop()
-        mode_manager.enter_clock()
-        logger.info("Cleanup complete.")
-
-    # Register cleanup to be called on exit
-    atexit.register(cleanup)
-
-    # Start the main loop
+    # 21. Keep the main thread alive
     try:
-        logger.info("Quadifyclean is now running.")
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        logger.info("KeyboardInterrupt received. Exiting application.")
-        cleanup()
+        logger.info("Shutting down Quadify...")
+    finally:
+        # 22. Clean up resources
+        buttons_leds.stop()
+        rotary_control.stop()
+        volumio_listener.stop_listener()
+        display_manager.clear_screen()
+        logger.info("Quadify has been shut down gracefully.")
 
 if __name__ == "__main__":
-    container = Container()
-    container.wire(modules=[__name__])
     main()

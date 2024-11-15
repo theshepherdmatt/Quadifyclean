@@ -11,34 +11,39 @@ class TidalManager(BaseManager):
         self.current_selection_index = 0
         self.font_key = 'menu_font'  # Define in config.yaml under fonts
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.mode_manager = mode_manager
-        
+        self.logger.setLevel(logging.INFO)  # Set to INFO or DEBUG as needed
+
         # Connect to VolumioListener signals
-        self.volumio_listener.qobuz_playlists_received.connect(self.update_tidal_playlists)  # Assuming same signal for Tidal
-        # If Tidal has separate signals, adjust accordingly
-        
+        self.volumio_listener.tidal_playlists_received.connect(self.update_tidal_playlists)  # Ensure correct signal
+        self.logger.debug("Connected to VolumioListener's tidal_playlists_received signal.")
+
         # Register mode change callback
         self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
-        
+        self.logger.debug("Registered mode change callback.")
+
         self.lock = threading.Lock()
 
     def start_mode(self):
         self.is_active = True
         self.current_selection_index = 0
+        self.logger.info("TidalManager: Starting tidal mode.")
         if not self.tidal_playlists:
             self.display_loading_screen()
-            self.volumio_listener.fetch_tidal_playlists()  # Ensure this method exists
+            self.volumio_listener.fetch_tidal_playlists()
+            self.logger.info("TidalManager: Fetching Tidal playlists.")
         else:
             self.display_tidal_playlists()
+            self.logger.info("TidalManager: Displaying existing Tidal playlists.")
 
     def stop_mode(self):
         self.is_active = False
-        self.clear_display()
+        self.display_manager.clear_screen()
+        self.logger.info("TidalManager: Stopped tidal mode and cleared display.")
 
     def update_tidal_playlists(self, playlists):
         with self.lock:
             self.tidal_playlists = playlists or []
-            self.logger.debug(f"Updated Tidal playlists: {[playlist['title'] for playlist in self.tidal_playlists]}")
+            self.logger.debug(f"TidalManager: Updated Tidal playlists: {[playlist['title'] for playlist in self.tidal_playlists]}")
             if self.is_active:
                 if self.tidal_playlists:
                     self.display_tidal_playlists()
@@ -46,6 +51,7 @@ class TidalManager(BaseManager):
                     self.display_no_playlists()
 
     def display_tidal_playlists(self):
+        self.logger.info("TidalManager: Displaying Tidal playlists.")
         def draw(draw_obj):
             y_offset = 10
             for i, playlist in enumerate(self.tidal_playlists):
@@ -57,21 +63,23 @@ class TidalManager(BaseManager):
                     fill="white" if i == self.current_selection_index else "gray"
                 )
         self.display_manager.draw_custom(draw)
-        self.logger.debug("Displayed Tidal playlists.")
+        self.logger.debug("TidalManager: draw_custom called to display Tidal playlists.")
 
     def scroll_selection(self, direction):
         if not self.is_active:
+            self.logger.debug("TidalManager: Scroll attempted while not active.")
             return
         with self.lock:
             self.current_selection_index = (self.current_selection_index + direction) % len(self.tidal_playlists)
             self.display_tidal_playlists()
-            self.logger.debug(f"Scrolled to Tidal playlist index: {self.current_selection_index}")
+            self.logger.debug(f"TidalManager: Scrolled to Tidal playlist index: {self.current_selection_index}")
 
     def select_item(self):
         if not self.is_active or not self.tidal_playlists:
+            self.logger.warning("TidalManager: Select attempted while inactive or no playlists available.")
             return
         selected_playlist = self.tidal_playlists[self.current_selection_index]
-        self.logger.info(f"Selected Tidal playlist: {selected_playlist['title']}")
+        self.logger.info(f"TidalManager: Selected Tidal playlist: {selected_playlist['title']}")
         self.volumio_listener.play_tidal_playlist(
             title=selected_playlist['title'],
             uri=selected_playlist['uri']
@@ -83,7 +91,7 @@ class TidalManager(BaseManager):
             position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
             font_key='menu_font'
         )
-        self.logger.debug("Displayed loading screen for Tidal playlists.")
+        self.logger.debug("TidalManager: Displayed loading screen for Tidal playlists.")
 
     def display_no_playlists(self):
         self.display_manager.display_text(
@@ -91,11 +99,13 @@ class TidalManager(BaseManager):
             position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
             font_key='menu_font'
         )
-        self.logger.warning("No Tidal playlists available to display.")
+        self.logger.warning("TidalManager: No Tidal playlists available to display.")
 
     def handle_mode_change(self, current_mode):
         if current_mode == "tidal":
+            self.logger.info("TidalManager: Switching to tidal mode.")
             self.start_mode()
         else:
             if self.is_active:
+                self.logger.info("TidalManager: Exiting tidal mode.")
                 self.stop_mode()

@@ -1,0 +1,738 @@
+# File: base_manager.py
+# src/managers/base_manager.py
+from abc import ABC, abstractmethod
+from PIL import Image, ImageDraw
+
+class BaseManager(ABC):
+    def __init__(self, display_manager, volumio_listener, mode_manager):
+        self.display_manager = display_manager
+        self.volumio_listener = volumio_listener
+        self.mode_manager = mode_manager
+        self.is_active = False
+        self.on_mode_change_callbacks = []
+
+    @abstractmethod
+    def start_mode(self):
+        pass
+
+    @abstractmethod
+    def stop_mode(self):
+        pass
+
+    def add_on_mode_change_callback(self, callback):
+        if callable(callback):
+            self.on_mode_change_callbacks.append(callback)
+
+    def notify_mode_change(self, mode):
+        for callback in self.on_mode_change_callbacks:
+            try:
+                callback(mode)
+            except Exception as e:
+                print(f"BaseManager: Error in callback {callback}: {e}")
+
+    def clear_display(self):
+        self.display_manager.clear_screen()
+
+
+# File: mode_manager.py
+# src/managers/mode_manager.py
+
+from transitions import Machine
+import threading
+import logging
+
+class ModeManager:
+    states = [
+        {'name': 'clock', 'on_enter': 'enter_clock'},
+        {'name': 'playback', 'on_enter': 'enter_playback'},
+        {'name': 'menu', 'on_enter': 'enter_menu'},
+        {'name': 'webradio', 'on_enter': 'enter_webradio'},
+        {'name': 'playlist', 'on_enter': 'enter_playlist'},
+        {'name': 'favourites', 'on_enter': 'enter_favourites'},
+        {'name': 'tidal', 'on_enter': 'enter_tidal'},
+    ]
+
+    def __init__(self, display_manager, clock, playback_manager, menu_manager, playlist_manager, radio_manager, tidal_manager, qobuz_manager):
+        self.display_manager = display_manager
+        self.clock = clock
+        self.playback_manager = playback_manager
+        self.menu_manager = menu_manager
+        self.playlist_manager = playlist_manager
+        self.radio_manager = radio_manager
+        self.tidal_manager = tidal_manager
+        self.qobuz_manager = qobuz_manager
+
+        # Set up logging
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.setLevel(logging.DEBUG)  # Adjust as needed
+
+        self.machine = Machine(
+            model=self,
+            states=ModeManager.states,
+            initial='clock',
+            auto_transitions=False
+        )
+
+        # Define transitions without 'before' since 'on_enter' handles method calls
+        self.machine.add_transition(trigger='to_playback', source='*', dest='playback')
+        self.machine.add_transition(trigger='to_menu', source='*', dest='menu')
+        self.machine.add_transition(trigger='to_webradio', source='*', dest='webradio')
+        self.machine.add_transition(trigger='to_playlist', source='*', dest='playlist')
+        self.machine.add_transition(trigger='to_favourites', source='*', dest='favourites')
+        self.machine.add_transition(trigger='to_tidal', source='*', dest='tidal')
+        self.machine.add_transition(trigger='to_clock', source='*', dest='clock')
+
+        self.on_mode_change_callbacks = []
+        self.lock = threading.Lock()
+
+        # Explicitly call 'enter_clock' to ensure initial state is set
+        self.enter_clock()
+
+    # Define enter methods with 'event' parameter
+    def enter_playback(self, event=None):
+        self.logger.debug("Entering playback mode.")
+        self.clock.stop()  # Stop clock mode if active
+        self.menu_manager.stop_mode()  # Stop other modes if necessary
+
+        # Start playback display through PlaybackManager
+        self.playback_manager.start_mode()
+        self.notify_mode_change('playback')
+
+    def enter_menu(self, event=None):
+        self.logger.debug("Entering menu mode.")
+        self.clock.stop()
+        self.playback_manager.stop()
+        self.radio_manager.stop_mode()
+        self.playlist_manager.stop_mode()
+        self.tidal_manager.stop_mode()
+        self.menu_manager.start_mode()
+        self.notify_mode_change('menu')
+
+    def enter_webradio(self, event=None):
+        self.logger.debug("Entering webradio mode.")
+        self.clock.stop()
+        self.playback_manager.stop()
+        self.menu_manager.stop_mode()
+        self.playlist_manager.stop_mode()
+        self.tidal_manager.stop_mode()
+        self.radio_manager.start_mode()
+        self.notify_mode_change('webradio')
+
+    def enter_playlist(self, event=None):
+        self.logger.debug("Entering playlist mode.")
+        self.clock.stop()
+        self.playback_manager.stop()
+        self.menu_manager.stop_mode()
+        self.radio_manager.stop_mode()
+        self.tidal_manager.stop_mode()
+        self.playlist_manager.start_mode()
+        self.notify_mode_change('playlist')
+
+    def enter_favourites(self, event=None):
+        self.logger.debug("Entering favourites mode.")
+        self.clock.stop()
+        self.playback_manager.stop()
+        self.menu_manager.stop_mode()
+        self.radio_manager.stop_mode()
+        self.playlist_manager.stop_mode()
+        self.tidal_manager.stop_mode()
+        # Implement favourites mode logic here
+        self.notify_mode_change('favourites')
+
+    def enter_tidal(self, event=None):
+        self.logger.debug("Entering tidal mode.")
+        self.clock.stop()
+        self.playback_manager.stop()
+        self.menu_manager.stop_mode()
+        self.radio_manager.stop_mode()
+        self.playlist_manager.stop_mode()
+        self.tidal_manager.start_mode()
+        self.notify_mode_change('tidal')
+
+    def enter_clock(self, event=None):
+        self.logger.debug("Entering clock mode.")
+        self.playback_manager.stop_mode()  # Stop playback display
+        self.clock.start()  # Start clock display
+        self.notify_mode_change('clock')
+
+    def process_state_change(self, state):
+        status = state.get("status", "")
+        self.logger.debug("Processing state change, Volumio status: {}".format(status))
+        
+        if status == "play":
+            self.to_playback()  # Switch to playback mode if playing
+        elif status in ["pause", "stop"]:
+            self.to_clock()  # Return to clock mode if paused or stopped
+
+    def add_on_mode_change_callback(self, callback):
+        with self.lock:
+            if callable(callback):
+                self.on_mode_change_callbacks.append(callback)
+                self.logger.debug(f"Added mode change callback: {callback}")
+
+    def notify_mode_change(self, current_mode):
+        """Notify listeners of the mode change."""
+        with self.lock:
+            self.logger.debug(f"Notifying mode change to: {current_mode}")
+            for callback in self.on_mode_change_callbacks:
+                try:
+                    callback(current_mode)
+                except Exception as e:
+                    self.logger.error(f"ModeManager: Error in callback {callback}: {e}")
+
+            # Notify DisplayManager directly
+            if hasattr(self.display_manager, "notify_mode_change"):
+                self.display_manager.notify_mode_change(current_mode)
+
+    def get_mode(self):
+        return self.state
+
+    def stop(self):
+        """Optional: Method to clean up if needed."""
+        pass
+
+
+# File: radio_manager.py
+# src/managers/radio_manager.py
+from src.managers.base_manager import BaseManager
+import logging
+from PIL import Image, ImageDraw
+import threading
+
+class RadioManager(BaseManager):
+    def __init__(self, display_manager, volumio_listener, mode_manager):
+        super().__init__(display_manager, volumio_listener, mode_manager)
+        self.radio_stations = []
+        self.current_selection_index = 0
+        self.font_key = 'menu_font'  # Define in config.yaml under fonts
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # Connect to VolumioListener signals
+        self.volumio_listener.webradio_received.connect(self.update_radio_stations)
+        
+        # Register mode change callback
+        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
+        
+        self.lock = threading.Lock()
+
+    def start_mode(self):
+        self.is_active = True
+        self.current_selection_index = 0
+        if not self.radio_stations:
+            print("No radio stations available, displaying loading screen...")
+            self.display_loading_screen()
+            self.volumio_listener.fetch_webradio_stations()
+        else:
+            print("Calling display_radio_stations in start_mode...")
+            self.display_radio_stations()
+
+
+    def stop_mode(self):
+        self.is_active = False
+        self.clear_display()
+        self.display_manager.clear_display()
+
+    def update_radio_stations(self, stations):
+        with self.lock:
+            self.radio_stations = stations or []
+            self.logger.debug(f"Updated radio stations: {[station['title'] for station in self.radio_stations]}")
+            if self.is_active and self.radio_stations:
+                self.display_radio_stations()
+            elif self.is_active:
+                self.display_no_stations()
+
+    def display_radio_stations(self):
+        print("Displaying radio stations")
+        def draw(draw_obj):
+            y_offset = 10
+            for i, station in enumerate(self.radio_stations):
+                arrow = "-> " if i == self.current_selection_index else "   "
+                draw_obj.text(
+                    (10, y_offset + i * 15),
+                    f"{arrow}{station['title']}",
+                    font=self.display_manager.fonts[self.font_key],
+                    fill="white" if i == self.current_selection_index else "gray"
+                )
+        self.display_manager.draw_custom(draw)
+        print("draw_custom called")
+
+    def scroll_selection(self, direction):
+        if not self.is_active:
+            return
+        with self.lock:
+            self.current_selection_index = (self.current_selection_index + direction) % len(self.radio_stations)
+            self.display_radio_stations()
+            self.logger.debug(f"Scrolled to radio station index: {self.current_selection_index}")
+
+    def select_item(self):
+        if not self.is_active or not self.radio_stations:
+            return
+        selected_station = self.radio_stations[self.current_selection_index]
+        self.logger.info(f"Selected radio station: {selected_station['title']}")
+        self.volumio_listener.play_webradio_station(
+            title=selected_station['title'],
+            uri=selected_station['uri']
+        )
+
+    def display_loading_screen(self):
+        self.display_manager.display_text(
+            "Loading Radios...",
+            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
+            font_key='menu_font'
+        )
+        self.logger.debug("Displayed loading screen for radio stations.")
+
+    def display_no_stations(self):
+        self.display_manager.display_text(
+            "No Radios Found",
+            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
+            font_key='menu_font'
+        )
+        self.logger.warning("No radio stations available to display.")
+
+    def handle_mode_change(self, current_mode):
+        if current_mode == "webradio":
+            print("Starting webradio mode")
+            self.start_mode()
+        elif self.is_active:
+            print("Stopping webradio mode")
+            self.stop_mode()
+
+
+# File: tidal_manager.py
+# src/managers/tidal_manager.py
+from src.managers.base_manager import BaseManager
+import logging
+from PIL import Image, ImageDraw
+import threading
+
+class TidalManager(BaseManager):
+    def __init__(self, display_manager, volumio_listener, mode_manager):
+        super().__init__(display_manager, volumio_listener, mode_manager)
+        self.tidal_playlists = []
+        self.current_selection_index = 0
+        self.font_key = 'menu_font'  # Define in config.yaml under fonts
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.mode_manager = mode_manager
+        
+        # Connect to VolumioListener signals
+        self.volumio_listener.qobuz_playlists_received.connect(self.update_tidal_playlists)  # Assuming same signal for Tidal
+        # If Tidal has separate signals, adjust accordingly
+        
+        # Register mode change callback
+        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
+        
+        self.lock = threading.Lock()
+
+    def start_mode(self):
+        self.is_active = True
+        self.current_selection_index = 0
+        if not self.tidal_playlists:
+            self.display_loading_screen()
+            self.volumio_listener.fetch_tidal_playlists()  # Ensure this method exists
+        else:
+            self.display_tidal_playlists()
+
+    def stop_mode(self):
+        self.is_active = False
+        self.clear_display()
+
+    def update_tidal_playlists(self, playlists):
+        with self.lock:
+            self.tidal_playlists = playlists or []
+            self.logger.debug(f"Updated Tidal playlists: {[playlist['title'] for playlist in self.tidal_playlists]}")
+            if self.is_active:
+                if self.tidal_playlists:
+                    self.display_tidal_playlists()
+                else:
+                    self.display_no_playlists()
+
+    def display_tidal_playlists(self):
+        def draw(draw_obj):
+            y_offset = 10
+            for i, playlist in enumerate(self.tidal_playlists):
+                arrow = "-> " if i == self.current_selection_index else "   "
+                draw_obj.text(
+                    (10, y_offset + i * 15),
+                    f"{arrow}{playlist['title']}",
+                    font=self.display_manager.fonts[self.font_key],
+                    fill="white" if i == self.current_selection_index else "gray"
+                )
+        self.display_manager.draw_custom(draw)
+        self.logger.debug("Displayed Tidal playlists.")
+
+    def scroll_selection(self, direction):
+        if not self.is_active:
+            return
+        with self.lock:
+            self.current_selection_index = (self.current_selection_index + direction) % len(self.tidal_playlists)
+            self.display_tidal_playlists()
+            self.logger.debug(f"Scrolled to Tidal playlist index: {self.current_selection_index}")
+
+    def select_item(self):
+        if not self.is_active or not self.tidal_playlists:
+            return
+        selected_playlist = self.tidal_playlists[self.current_selection_index]
+        self.logger.info(f"Selected Tidal playlist: {selected_playlist['title']}")
+        self.volumio_listener.play_tidal_playlist(
+            title=selected_playlist['title'],
+            uri=selected_playlist['uri']
+        )
+
+    def display_loading_screen(self):
+        self.display_manager.display_text(
+            "Loading Tidal Playlists...",
+            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
+            font_key='menu_font'
+        )
+        self.logger.debug("Displayed loading screen for Tidal playlists.")
+
+    def display_no_playlists(self):
+        self.display_manager.display_text(
+            "No Tidal Playlists Found",
+            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
+            font_key='menu_font'
+        )
+        self.logger.warning("No Tidal playlists available to display.")
+
+    def handle_mode_change(self, current_mode):
+        if current_mode == "tidal":
+            self.start_mode()
+        else:
+            if self.is_active:
+                self.stop_mode()
+
+# File: menu_manager.py
+# src/managers/menu_manager.py
+
+from src.managers.base_manager import BaseManager
+import logging
+from PIL import Image, ImageDraw, ImageFont
+
+class MenuManager(BaseManager):
+    def __init__(self, display_manager, volumio_listener, mode_manager):
+        super().__init__(display_manager, volumio_listener, mode_manager)
+        self.menu_stack = []
+        self.current_menu_items = ["Webradio", "Playlists", "Favourites", "Tidal", "Qobuz"]
+        self.current_selection_index = 0
+        self.font_key = 'menu_font'  # Define in config.yaml under fonts
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.setLevel(logging.INFO)  # Adjust as needed
+        self.logger.info("MenuManager initialized.")
+
+        # Register mode change callback
+        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
+
+    def start_mode(self):
+        self.is_active = True
+        self.current_selection_index = 0
+        self.display_menu()
+        self.logger.info("MenuManager: Started menu mode.")
+
+    def stop_mode(self):
+        self.is_active = False
+        self.display_manager.clear_display()  # Ensure this line exists
+        self.logger.info("MenuManager: Stopped menu mode.")
+
+    def display_menu(self):
+        def draw(draw_obj):
+            y_offset = 10
+            for i, item in enumerate(self.current_menu_items):
+                arrow = "-> " if i == self.current_selection_index else "   "
+                draw_obj.text(
+                    (10, y_offset + i * 15),
+                    f"{arrow}{item}",
+                    font=self.display_manager.fonts[self.font_key],
+                    fill="white" if i == self.current_selection_index else "gray"
+                )
+        self.display_manager.draw_custom(draw)
+        self.logger.info("MenuManager: Displayed menu.")
+
+    def scroll_selection(self, direction):
+        if not self.is_active:
+            return
+        self.current_selection_index = (self.current_selection_index + direction) % len(self.current_menu_items)
+        self.display_menu()
+        self.logger.debug(f"MenuManager: Scrolled to selection index: {self.current_selection_index}")
+
+    def select_item(self):
+        if not self.is_active or not self.current_menu_items:
+            return
+        selected_item = self.current_menu_items[self.current_selection_index]
+        self.logger.info(f"MenuManager: Selected menu item: {selected_item}")
+        if selected_item == "Webradio":
+            self.mode_manager.to_webradio()
+        elif selected_item == "Playlists":
+            self.mode_manager.to_playlist()
+        elif selected_item == "Favourites":
+            self.mode_manager.to_favourites()
+        elif selected_item == "Tidal":
+            self.mode_manager.to_tidal()
+        elif selected_item == "Qobuz":
+            self.mode_manager.to_qobuz()
+
+    def handle_mode_change(self, current_mode):
+        if current_mode == "menu":
+            self.start_mode()
+        else:
+            if self.is_active:
+                self.stop_mode()
+
+
+# File: __init__.py
+
+
+# File: manager_factory.py
+# src/managers/manager_factory.py
+class ManagerFactory:
+    def __init__(self, display_manager, volumio_listener, mode_manager):
+        self.display_manager = display_manager
+        self.volumio_listener = volumio_listener
+        self.mode_manager = mode_manager
+
+    def create_menu_manager(self):
+        from src.managers.menu_manager import MenuManager
+        return MenuManager(self.display_manager, self.volumio_listener, self.mode_manager)
+
+    def create_playlist_manager(self):
+        from src.managers.playlist_manager import PlaylistManager
+        return PlaylistManager(self.display_manager, self.volumio_listener, self.mode_manager)
+
+    def create_radio_manager(self):
+        from src.managers.radio_manager import RadioManager
+        return RadioManager(self.display_manager, self.volumio_listener, self.mode_manager)
+
+    def create_tidal_manager(self):
+        from src.managers.tidal_manager import TidalManager
+        return TidalManager(self.display_manager, self.volumio_listener, self.mode_manager)
+
+    def create_qobuz_manager(self):
+        from src.managers.qobuz_manager import QobuzManager
+        return QobuzManager(self.display_manager, self.volumio_listener, self.mode_manager)
+    
+    # Add methods for other managers as needed
+
+
+
+# File: qobuz_manager.py
+# src/managers/qobuz_manager.py
+
+from src.managers.base_manager import BaseManager
+import logging
+from PIL import Image, ImageDraw
+import threading
+
+class QobuzManager(BaseManager):
+    def __init__(self, display_manager, volumio_listener, mode_manager):
+        super().__init__(display_manager, volumio_listener, mode_manager)
+        self.qobuz_playlists = []
+        self.current_selection_index = 0
+        self.font_key = 'menu_font'  # Define in config.yaml under fonts
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.mode_manager = mode_manager
+        
+        # Connect to VolumioListener signals
+        self.volumio_listener.qobuz_playlists_received.connect(self.update_qobuz_playlists)
+        # If Qobuz has separate signals, adjust accordingly
+        
+        # Register mode change callback
+        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
+        
+        self.lock = threading.Lock()
+
+    def start_mode(self):
+        self.is_active = True
+        self.current_selection_index = 0
+        if not self.qobuz_playlists:
+            self.display_loading_screen()
+            self.volumio_listener.fetch_qobuz_playlists()  # Ensure this method exists
+        else:
+            self.display_qobuz_playlists()
+
+    def stop_mode(self):
+        self.is_active = False
+        self.clear_display()
+
+    def update_qobuz_playlists(self, playlists):
+        with self.lock:
+            self.qobuz_playlists = playlists or []
+            self.logger.debug(f"Updated Qobuz playlists: {[playlist['title'] for playlist in self.qobuz_playlists]}")
+            if self.is_active:
+                if self.qobuz_playlists:
+                    self.display_qobuz_playlists()
+                else:
+                    self.display_no_playlists()
+
+    def display_qobuz_playlists(self):
+        def draw(draw_obj):
+            y_offset = 10
+            for i, playlist in enumerate(self.qobuz_playlists):
+                arrow = "-> " if i == self.current_selection_index else "   "
+                draw_obj.text(
+                    (10, y_offset + i * 15),
+                    f"{arrow}{playlist['title']}",
+                    font=self.display_manager.fonts[self.font_key],
+                    fill="white" if i == self.current_selection_index else "gray"
+                )
+        self.display_manager.draw_custom(draw)
+        self.logger.debug("Displayed Qobuz playlists.")
+
+    def scroll_selection(self, direction):
+        if not self.is_active:
+            return
+        with self.lock:
+            self.current_selection_index = (self.current_selection_index + direction) % len(self.qobuz_playlists)
+            self.display_qobuz_playlists()
+            self.logger.debug(f"Scrolled to Qobuz playlist index: {self.current_selection_index}")
+
+    def select_item(self):
+        if not self.is_active or not self.qobuz_playlists:
+            return
+        selected_playlist = self.qobuz_playlists[self.current_selection_index]
+        self.logger.info(f"Selected Qobuz playlist: {selected_playlist['title']}")
+        self.volumio_listener.play_qobuz_playlist(
+            title=selected_playlist['title'],
+            uri=selected_playlist['uri']
+        )
+
+    def display_loading_screen(self):
+        self.display_manager.display_text(
+            "Loading Qobuz Playlists...",
+            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
+            font_key='menu_font'
+        )
+        self.logger.debug("Displayed loading screen for Qobuz playlists.")
+
+    def display_no_playlists(self):
+        self.display_manager.display_text(
+            "No Qobuz Playlists Found",
+            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
+            font_key='menu_font'
+        )
+        self.logger.warning("No Qobuz playlists available to display.")
+
+    def handle_mode_change(self, current_mode):
+        if current_mode == "qobuz":
+            self.start_mode()
+        else:
+            if self.is_active:
+                self.stop_mode()
+
+
+
+# File: playlist_manager.py
+# src/managers/playlist_manager.py
+from src.managers.base_manager import BaseManager
+
+class PlaylistManager(BaseManager):
+    def __init__(self, display_manager, volumio_listener, mode_manager):
+        super().__init__(display_manager, volumio_listener, mode_manager)
+        self.playlists = []
+        self.current_selection_index = 0
+        self.font_key = 'menu_font'  # Define in config.yaml under fonts
+        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
+
+    def start_mode(self):
+        self.is_active = True
+        self.current_selection_index = 0
+        if not self.playlists:
+            self.display_loading_screen()
+            self.volumio_listener.fetch_playlists()
+        else:
+            self.display_playlists()
+
+    def stop_mode(self):
+        self.is_active = False
+        self.clear_display()
+
+    def update_playlists(self, playlists):
+        self.playlists = playlists or []
+        if self.is_active:
+            if self.playlists:
+                self.display_playlists()
+            else:
+                self.display_no_playlists()
+
+    def display_playlists(self):
+        def draw(draw_obj):
+            y_offset = 10
+            for i, playlist in enumerate(self.playlists):
+                arrow = "-> " if i == self.current_selection_index else "   "
+                draw_obj.text(
+                    (10, y_offset + i * 15),
+                    f"{arrow}{playlist['title']}",
+                    font=self.display_manager.fonts[self.font_key],
+                    fill="white" if i == self.current_selection_index else "gray"
+                )
+        self.display_manager.draw_custom(draw)
+
+    def scroll_selection(self, direction):
+        if not self.is_active:
+            return
+        self.current_selection_index = (self.current_selection_index + direction) % len(self.playlists)
+        self.display_playlists()
+
+    def select_item(self):
+        if not self.is_active or not self.playlists:
+            return
+        selected_playlist = self.playlists[self.current_selection_index]
+        self.volumio_listener.play_playlist(selected_playlist['title'])
+
+    def display_loading_screen(self):
+        self.display_manager.display_text(
+            "Loading Playlists...",
+            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
+            font_key='menu_font'
+        )
+
+    def display_no_playlists(self):
+        self.display_manager.display_text(
+            "No Playlists Found",
+            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
+            font_key='menu_font'
+        )
+
+    def handle_mode_change(self, current_mode):
+        if current_mode == "playlist":
+            self.start_mode()
+        else:
+            if self.is_active:
+                self.stop_mode()
+
+
+# File: concrete_base_manager.py
+# src/managers/concrete_base_manager.py
+
+from src.managers.base_manager import BaseManager
+from src.display.playback_manager import PlaybackManager
+from src.managers.menu_manager import MenuManager
+from src.managers.playlist_manager import PlaylistManager
+from src.managers.radio_manager import RadioManager
+from src.managers.tidal_manager import TidalManager
+from src.managers.qobuz_manager import QobuzManager
+
+class ConcreteBaseManager(BaseManager):
+    def __init__(
+        self,
+        display_manager,
+        volumio_listener,
+        mode_manager,
+        playback_manager: PlaybackManager,
+        menu_manager: MenuManager,
+        playlist_manager: PlaylistManager,
+        radio_manager: RadioManager,
+        tidal_manager: TidalManager,
+        qobuz_manager: QobuzManager,
+    ):
+        # Pass required parameters to BaseManager
+        super().__init__(display_manager, volumio_listener, mode_manager)
+        
+        # Store individual managers
+        self.playback_manager = playback_manager
+        self.menu_manager = menu_manager
+        self.playlist_manager = playlist_manager
+        self.radio_manager = radio_manager
+        self.tidal_manager = tidal_manager
+        self.qobuz_manager = qobuz_manager
+
+
