@@ -36,9 +36,12 @@ class TidalManager(BaseManager):
             self.logger.info("TidalManager: Displaying existing Tidal playlists.")
 
     def stop_mode(self):
+        if not self.is_active:
+            self.logger.debug("stop_mode called, but mode is already inactive.")  # Corrected to use self.logger
+            return
         self.is_active = False
         self.display_manager.clear_screen()
-        self.logger.info("TidalManager: Stopped tidal mode and cleared display.")
+        self.logger.info("TidalManager: Stopped Tidal mode and cleared display.")  # Corrected to use self.logger
 
     def update_tidal_playlists(self, playlists):
         with self.lock:

@@ -43,131 +43,69 @@ def load_config(config_path='/config.yaml'):
 def main():
     # 1. Set up logging
     logging.basicConfig(
-        level=logging.INFO,  # Changed from DEBUG to INFO to reduce verbosity
+        level=logging.INFO,  # Adjust level as needed
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ]
+        handlers=[logging.StreamHandler(sys.stdout)]
     )
     logger = logging.getLogger("Main")
 
-    # 2. Suppress logging from third-party libraries
-    logging.getLogger('PIL').setLevel(logging.WARNING)
-    logging.getLogger('socketio').setLevel(logging.WARNING)
-    logging.getLogger('engineio').setLevel(logging.WARNING)
-    logging.getLogger('urllib3').setLevel(logging.WARNING)
-    logging.getLogger('blinker').setLevel(logging.WARNING)
-    logging.getLogger('transitions').setLevel(logging.WARNING)
-
-    # 3. Load configuration
+    # 2. Load configuration
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, '..', 'config.yaml')
-    config_path = os.path.abspath(config_path)  # Ensure it's an absolute path
-    print(f"Using config file path: {config_path}")
     config = load_config(config_path)
 
-    # 4. Extract and pass display configuration to DisplayManager
+    # 3. Initialize DisplayManager
     display_config = config.get('display', {})
-    
-    # Debugging: Print the display config being passed
-    print("Display Config being passed to DisplayManager:", display_config)
-    logging.debug(f"Display Config being passed to DisplayManager: {display_config}")
-
-    print("Step 1: Initializing DisplayManager...")
     display_manager = DisplayManager(display_config)
-    print("Step 1 complete: DisplayManager initialized.")
 
-    # 5. Display startup logo and loading animation
-    logo_path = os.path.join(script_dir, 'assets/images/logo.bmp')
-    loading_gif_path = os.path.join(script_dir, 'assets/images/Loading.gif')
-
-    print("Step 2: Displaying logo and loading animation...")
-    display_manager.display_image(logo_path, resize=True)
-    time.sleep(2)
-    display_manager.display_image(loading_gif_path, resize=True, timeout=2)
-    print("Step 2 complete: Displaying startup visuals.")
-
-    # 6. Initialize VolumioListener
+    # 4. Initialize VolumioListener
     volumio_config = config.get('volumio', {})
     volumio_host = volumio_config.get('host', 'localhost')
     volumio_port = volumio_config.get('port', 3000)
-
-    print("Step 3: Initializing VolumioListener...")
     volumio_listener = VolumioListener(host=volumio_host, port=volumio_port)
-    print("Step 3 complete: VolumioListener initialized.")
 
-    # 7. Initialize Clock
-    print("Step 4: Initializing Clock...")
-    clock = Clock(display_manager, display_config)  # Pass display_config if needed
-    print("Step 4 complete: Clock initialized.")
+    # 5. Initialize Clock
+    clock = Clock(display_manager, display_config)
 
-    # 8. Initialize PlaybackManager
-    print("Step 5: Initializing PlaybackManager...")
-    playback_manager = PlaybackManager(display_manager, volumio_listener, mode_manager=None)  # Ensure arguments match __init__
-    print("Step 5 complete: PlaybackManager initialized.")
+    # 6. Initialize ModeManager Early
+    mode_manager = ModeManager(
+        display_manager=display_manager,
+        clock=clock,
+        playback_manager=None,  # Placeholder, set later
+        menu_manager=None,
+        playlist_manager=None,
+        radio_manager=None,
+        tidal_manager=None,
+        qobuz_manager=None
+    )
 
-    # 9. Initialize ManagerFactory with DisplayManager and VolumioListener
-    print("Step 6: Initializing ManagerFactory...")
-    manager_factory = ManagerFactory(display_manager, volumio_listener, mode_manager=None)  # ModeManager will be set later
-    print("Step 6 complete: ManagerFactory initialized.")
+    # 7. Initialize ManagerFactory
+    manager_factory = ManagerFactory(display_manager, volumio_listener, mode_manager)
 
-    # 10. Initialize other managers using ManagerFactory
-    print("Step 7: Creating other managers...")
+    # 8. Create Managers Using ManagerFactory
     menu_manager = manager_factory.create_menu_manager()
     playlist_manager = manager_factory.create_playlist_manager()
     radio_manager = manager_factory.create_radio_manager()
     tidal_manager = manager_factory.create_tidal_manager()
     qobuz_manager = manager_factory.create_qobuz_manager()
-    print("Step 7 complete: Other managers created.")
 
-    # 11. Initialize ModeManager with all managers
-    print("Step 8: Initializing ModeManager...")
-    mode_manager = ModeManager(
-        display_manager=display_manager,
-        clock=clock,
-        playback_manager=playback_manager,
-        menu_manager=menu_manager,
-        playlist_manager=playlist_manager,
-        radio_manager=radio_manager,
-        tidal_manager=tidal_manager,
-        qobuz_manager=qobuz_manager
-    )
-    print("Step 8 complete: ModeManager initialized.")
+    # 9. Assign Managers to ModeManager
+    mode_manager.playback_manager = PlaybackManager(display_manager, volumio_listener, mode_manager)
+    mode_manager.menu_manager = menu_manager
+    mode_manager.playlist_manager = playlist_manager
+    mode_manager.radio_manager = radio_manager
+    mode_manager.tidal_manager = tidal_manager
+    mode_manager.qobuz_manager = qobuz_manager
 
-    # 12. Assign ModeManager to VolumioListener and other managers
-    print("Step 9: Assigning ModeManager to managers...")
+    # 10. Assign ModeManager to VolumioListener
     volumio_listener.mode_manager = mode_manager
-    playback_manager.mode_manager = mode_manager
-    menu_manager.mode_manager = mode_manager
-    playlist_manager.mode_manager = mode_manager
-    radio_manager.mode_manager = mode_manager
-    tidal_manager.mode_manager = mode_manager
-    qobuz_manager.mode_manager = mode_manager
-    print("Step 9 complete: ModeManager assigned.")
 
-    # 13. Connect to Volumio after assigning ModeManager
-    print("Step 10: Connecting to Volumio...")
-    volumio_listener.connect()
-    print("Step 10 complete: Connected to Volumio.")
+    # 11. Initialize ButtonsLEDController
+    buttons_leds = ButtonsLEDController(volumio_listener=volumio_listener, config_path=config_path)
 
-    # 14. Initialize StateHandler
-    print("Step 11: Initializing StateHandler...")
-    state_handler = StateHandler(volumio_listener, mode_manager)
-    print("Step 11 complete: StateHandler initialized.")
-
-    # 15. Initialize ButtonsLEDController
-    print("Step 12: Initializing ButtonsLEDController...")
-    buttons_leds = ButtonsLEDController(
-        volumio_listener=volumio_listener,
-        config_path=config_path
-    )
-    buttons_leds.start()
-    print("Step 12 complete: ButtonsLEDController started.")
-
-    # 16. Define RotaryControl callbacks
+    # 12. Define RotaryControl Callbacks
     def on_rotate(direction):
         current_mode = mode_manager.get_mode()
-        logger.debug(f"Rotary rotated: {'RIGHT' if direction == 1 else 'LEFT'} in mode {current_mode}.")
         if current_mode == 'menu':
             menu_manager.scroll_selection(direction)
         elif current_mode == 'webradio':
@@ -179,60 +117,48 @@ def main():
         elif current_mode == 'qobuz':
             qobuz_manager.scroll_selection(direction)
         elif current_mode == 'playback':
-            volume_change = 5 * direction  # Adjust volume by 5 units per rotation
-            playback_manager.adjust_volume(volume_change)
+            volume_change = 5 * direction
+            mode_manager.playback_manager.adjust_volume(volume_change)
 
     def on_button_press():
         current_mode = mode_manager.get_mode()
-        logger.debug(f"Button pressed in mode {current_mode}.")
         if current_mode == 'clock':
             mode_manager.to_menu()
         elif current_mode == 'menu':
             menu_manager.select_item()
-        elif current_mode in ['webradio', 'playlist', 'favourites', 'tidal', 'qobuz']:
-            pass
-        elif current_mode == 'playback':
-            playback_manager.toggle_play_pause()
 
-    # 17. Initialize RotaryControl
-    print("Step 13: Initializing RotaryControl...")
+    # 13. Initialize RotaryControl
     rotary_control = RotaryControl(
         config_path=config_path,
         rotation_callback=on_rotate,
         button_callback=on_button_press
     )
-    print("Step 13 complete: RotaryControl initialized.")
 
-    # 18. Start RotaryControl GPIO event detection in a separate thread
-    print("Step 14: Starting RotaryControl GPIO event detection...")
+    # 14. Start RotaryControl Event Detection
     rotary_thread = threading.Thread(target=rotary_control.setup_gpio, daemon=True)
     rotary_thread.start()
-    print("Step 14 complete: RotaryControl GPIO event detection started.")
 
-    # 19. Wait until VolumioListener is connected
+    # 15. Wait Until VolumioListener is Connected
     logger.info("Waiting for Volumio to connect...")
     while not volumio_listener.is_connected:
         time.sleep(1)
-        logger.debug("Still waiting for Volumio to connect...")
 
-    # 20. Set initial mode to Clock
-    print("Step 15: Setting initial mode to Clock...")
+    # 16. Set Initial Mode to Clock
     mode_manager.to_clock()
-    print("Step 15 complete: Initial mode set to Clock.")
 
-    # 21. Keep the main thread alive
+    # 17. Run the Main Application Loop
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("Shutting down Quadify...")
     finally:
-        # 22. Clean up resources
         buttons_leds.stop()
         rotary_control.stop()
         volumio_listener.stop_listener()
         display_manager.clear_screen()
         logger.info("Quadify has been shut down gracefully.")
+
 
 if __name__ == "__main__":
     main()

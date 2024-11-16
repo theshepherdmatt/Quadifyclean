@@ -17,12 +17,10 @@ class StateHandler:
         # Register as a mode change callback
         self.mode_manager.add_on_mode_change_callback(self.on_mode_change)
 
-    def on_volumio_state_change(self, sender, **kwargs):
-        state = kwargs.get('state')
-        self.logger.info("StateHandler: Received state change.")
-        # Handle the state change using the state data
-        if state:
-            self.mode_manager.process_state_change(state)
+    def on_volumio_state_change(self, sender, state_data=None):
+        """Handle state changes from VolumioListener."""
+        if state_data is not None:
+            self.logger.debug(f"Processing state: {state_data}")
 
     def on_mode_change(self, current_mode):
         self.logger.info(f"StateHandler: Mode changed to {current_mode}")

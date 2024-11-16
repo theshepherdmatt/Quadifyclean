@@ -11,6 +11,15 @@ class ManagerFactory:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)  # Set to INFO or DEBUG as needed
         self.logger.info("ManagerFactory initialized.")
+    
+    def create_mode_manager(self):
+        if self.mode_manager is None:
+            self.mode_manager = ModeManager(
+                self.display_manager,
+                self.volumio_listener,
+                None  # Replace None with actual required arguments
+            )
+        return self.mode_manage
 
     def create_menu_manager(self):
         from src.managers.menu_manager import MenuManager

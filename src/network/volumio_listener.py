@@ -1,25 +1,27 @@
 # src/network/volumio_listener.py
 
-import sys
-sys.setrecursionlimit(1500)
-
 import socketio
 import logging
 import time
-from blinker import Signal
 import threading
+from blinker import Signal
 
 class VolumioListener:
     def __init__(self, host='localhost', port=3000, mode_manager=None, reconnect_delay=5):
+        """
+        Initialize the VolumioListener.
+        """
         self.logger = logging.getLogger("VolumioListener")
-        self.logger.setLevel(logging.DEBUG)  # Adjust as needed
+        self.logger.setLevel(logging.DEBUG)
         self.logger.debug("[VolumioListener] Initializing...")
+
         self.host = host
         self.port = port
         self.reconnect_delay = reconnect_delay
-        self.mode_manager = mode_manager 
+        self.mode_manager = mode_manager
         self.socketIO = socketio.Client(logger=False, engineio_logger=False, reconnection=True)
-        self.register_socketio_events()
+
+        self.mode_manager = mode_manager
 
         # Define Blinker signals
         self.connected = Signal('connected')
@@ -35,8 +37,9 @@ class VolumioListener:
         self.current_state = {}
         self.current_volume = 50
         self._running = True
-        self._reconnect_attempt = 1  # Track reconnect attempts
+        self._reconnect_attempt = 1
 
+        self.register_socketio_events()
         self.connect()
 
     def register_socketio_events(self):
@@ -49,45 +52,37 @@ class VolumioListener:
         self.socketIO.on('pushTrack', self.on_push_track)
 
     def connect(self):
-        """Attempts to connect to the Volumio SocketIO server and starts event loop in a thread."""
+        """Connect to the Volumio server."""
+        if self.socketIO.connected:
+            self.logger.info("[VolumioListener] Already connected.")
+            return
         try:
-            self.logger.info("[VolumioListener] Attempting to connect to Volumio...")
+            self.logger.info(f"[VolumioListener] Connecting to Volumio at {self.host}:{self.port}...")
             self.socketIO.connect(f"http://{self.host}:{self.port}")
-            threading.Thread(target=self._run_event_loop, daemon=True).start()
+            self.logger.info("[VolumioListener] Successfully connected.")
         except Exception as e:
             self.logger.error(f"[VolumioListener] Connection error: {e}")
             self.schedule_reconnect()
 
-    def _run_event_loop(self):
-        """Runs the event loop for non-blocking continuous listening."""
-        while self._running:
-            try:
-                self.socketIO.sleep(0.1)  # Non-blocking event loop
-            except Exception as e:
-                self.logger.error(f"[VolumioListener] Error in event loop: {e}")
-                self.schedule_reconnect()
-                break
-
-    def stop_listener(self):
-        """Stops the event loop and disconnects gracefully."""
-        self._running = False
-        if self.socketIO.connected:
-            self.socketIO.disconnect()
-        self.logger.info("[VolumioListener] Stopped.")
-
     def on_connect(self):
+        """Handle successful connection."""
         self.logger.info("[VolumioListener] Connected to Volumio.")
-        self._reconnect_attempt = 1  # Reset attempts on successful connection
+        self._reconnect_attempt = 1
         self.connected.send()
         self.socketIO.emit('getState')
 
-    def on_disconnect(self, *args, **kwargs):
+    def is_connected(self):
+        """Check if the client is connected to Volumio."""
+        return self.socketIO.connected
+
+    def on_disconnect(self):
+        """Handle disconnection."""
         self.logger.warning("[VolumioListener] Disconnected from Volumio.")
         self.disconnected.send()
         self.schedule_reconnect()
 
     def schedule_reconnect(self):
-        """Schedules a reconnection attempt with exponential backoff."""
+        """Schedule a reconnection attempt."""
         delay = min(self.reconnect_delay * self._reconnect_attempt, 60)
         self.logger.info(f"[VolumioListener] Reconnecting in {delay} seconds...")
         threading.Thread(target=self._reconnect_after_delay, args=(self._reconnect_attempt,), daemon=True).start()
@@ -99,27 +94,31 @@ class VolumioListener:
             self.connect()
 
     def register_state_change_callback(self, callback):
-        """Register a callback to be executed when the state changes."""
+        """Register a callback for state changes."""
         if callable(callback):
             self.state_changed.connect(callback)
             self.logger.debug(f"[VolumioListener] State change callback registered: {callback}")
         else:
             self.logger.warning("[VolumioListener] Provided callback is not callable.")
 
-    def on_push_state(self, data):
-        self.logger.info("[VolumioListener] Received pushState event.")
-        self.current_state = data  # Store the current state
 
-        # Notify mode manager, if set
+    def on_push_state(self, data):
+        """Handle playback state changes."""
+        self.logger.info("[VolumioListener] Received pushState event.")
+        self.current_state = data
+        self.logger.debug(f"Playback state: {data}")
+
         if self.mode_manager:
             self.mode_manager.process_state_change(data)
-        else:
-            self.logger.warning("ModeManager is not set on VolumioListener, ignoring state change.")
 
-        # Notify registered callbacks through the state_changed signal
-        self.state_changed.send(self, state=data)
-
+    def get_current_state(self):
+        """
+        Return the current state of the Volumio player.
+        """
+        return self.current_state
+        
     def on_push_browse_library(self, data):
+        """Handle 'pushBrowseLibrary' events."""
         self.logger.info("[VolumioListener] Received pushBrowseLibrary event.")
         uri = data.get('uri', '')
         if 'playlists' in uri and 'tidal' not in uri and 'qobuz' not in uri:
@@ -136,101 +135,71 @@ class VolumioListener:
             self.qobuz_playlists_received.send(playlists=qobuz_playlists)
 
     def on_push_track(self, data):
+        """Handle 'pushTrack' events."""
         self.logger.info("[VolumioListener] Received pushTrack event.")
         track_info = self.extract_track_info(data)
         self.track_changed.send(track_info=track_info)
 
     def extract_playlists(self, data):
+        """Extract playlist data."""
         if 'navigation' in data and 'lists' in data['navigation']:
             playlists = data['navigation']['lists'][0].get('items', [])
             return [{'title': item['title'], 'uri': item['uri']} for item in playlists if 'title' in item and 'uri' in item]
         return []
 
     def extract_webradio(self, data):
+        """Extract webradio data."""
         if 'navigation' in data and 'lists' in data['navigation']:
             radio_items = data['navigation']['lists'][0].get('items', [])
             return [
-                {
-                    'title': item['title'],
-                    'uri': item['uri'],
-                    'albumart': item.get('albumart', ''),
-                    'bitrate': item.get('bitrate', 0)
-                }
+                {'title': item['title'], 'uri': item['uri'], 'albumart': item.get('albumart', ''), 'bitrate': item.get('bitrate', 0)}
                 for item in radio_items if item.get('type') == 'webradio'
             ]
         return []
 
     def extract_track_info(self, data):
+        """Extract track info."""
         track = data.get('track', {})
-        return {
-            'title': track.get('title', 'Unknown Title'),
-            'artist': track.get('artist', 'Unknown Artist'),
-            'albumart': track.get('albumart', ''),
-            'uri': track.get('uri', '')
-        }
+        return {'title': track.get('title', 'Unknown Title'), 'artist': track.get('artist', 'Unknown Artist'), 'albumart': track.get('albumart', ''), 'uri': track.get('uri', '')}
 
     def fetch_playlists(self):
-        self._emit_with_check('browseLibrary', {'uri': 'playlists'}, "fetch playlists")
+        """Fetch playlists."""
+        self.socketIO.emit('browseLibrary', {'uri': 'playlists'})
 
     def fetch_webradio_stations(self, uri="radio/myWebRadio"):
-        self._emit_with_check('browseLibrary', {'uri': uri}, "fetch webradio stations")
+        """Fetch webradio stations."""
+        self.socketIO.emit('browseLibrary', {'uri': uri})
 
     def fetch_tidal_playlists(self):
-        self._emit_with_check('browseLibrary', {'uri': 'tidal'}, "fetch Tidal playlists")
+        """Fetch Tidal playlists."""
+        self.socketIO.emit('browseLibrary', {'uri': 'tidal'})
 
     def fetch_qobuz_playlists(self):
-        self._emit_with_check('browseLibrary', {'uri': 'qobuz'}, "fetch Qobuz playlists")
+        """Fetch Qobuz playlists."""
+        self.socketIO.emit('browseLibrary', {'uri': 'qobuz'})
 
     def play_playlist(self, playlist_name):
-        self._emit_with_check('playPlaylist', {'name': playlist_name}, f"play playlist {playlist_name}")
+        """Play a specific playlist."""
+        self.socketIO.emit('playPlaylist', {'name': playlist_name})
 
     def play_webradio_station(self, title, uri):
-        self._emit_with_check('replaceAndPlay', {
-            "service": "webradio",
-            "type": "webradio",
-            "title": title,
-            "uri": uri
-        }, f"play webradio station {title}")
+        """Play a specific webradio station."""
+        self.socketIO.emit('replaceAndPlay', {'service': 'webradio', 'type': 'webradio', 'title': title, 'uri': uri})
 
     def play_tidal_playlist(self, title, uri):
-        self._emit_with_check('replaceAndPlay', {
-            "service": "tidal",
-            "type": "playlist",
-            "title": title,
-            "uri": uri
-        }, f"play Tidal playlist {title}")
+        """Play a Tidal playlist."""
+        self.socketIO.emit('replaceAndPlay', {'service': 'tidal', 'type': 'playlist', 'title': title, 'uri': uri})
 
     def play_qobuz_playlist(self, title, uri):
-        self._emit_with_check('replaceAndPlay', {
-            "service": "qobuz",
-            "type": "playlist",
-            "title": title,
-            "uri": uri
-        }, f"play Qobuz playlist {title}")
+        """Play a Qobuz playlist."""
+        self.socketIO.emit('replaceAndPlay', {'service': 'qobuz', 'type': 'playlist', 'title': title, 'uri': uri})
 
     def adjust_volume(self, increment):
-        if self.socketIO.connected:
-            try:
-                current_volume = int(self.current_state.get('volume', 50))
-                new_volume = min(max(current_volume + increment, 0), 100)
-                self.socketIO.emit('volume', new_volume)
-                self.logger.info(f"[VolumioListener] Volume adjusted to {new_volume}%.")
-            except ValueError as e:
-                self.logger.error(f"[VolumioListener] Invalid volume value: {e}")
-        else:
-            self.logger.warning("Cannot adjust volume - not connected.")
-
-    def get_current_state(self):
-        return self.current_state
-
-    @property
-    def is_connected(self):
-        return self.socketIO.connected
-
-    def _emit_with_check(self, event, data, action_description):
-        if self.socketIO.connected:
-            self.logger.info(f"[VolumioListener] Attempting to {action_description}.")
-            self.socketIO.emit(event, data)
-            self.logger.debug(f"[VolumioListener] '{event}' event emitted with data: {data}")
-        else:
-            self.logger.warning(f"[VolumioListener] Cannot {action_description} - not connected.")
+        """Adjust volume."""
+        try:
+            current_volume = int(self.current_state.get('volume', 50))
+            new_volume = min(max(current_volume + increment, 0), 100)
+            self.socketIO.emit('volume', new_volume)
+            self.logger.info(f"[VolumioListener] Volume adjusted to {new_volume}%.")
+        except ValueError as e:
+            self.logger.error(f"[VolumioListener] Invalid volume value: {e}")

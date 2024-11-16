@@ -1,738 +1,1232 @@
-# File: base_manager.py
-# src/managers/base_manager.py
-from abc import ABC, abstractmethod
-from PIL import Image, ImageDraw
+# File: test_qobuz_manager.py
+import unittest
+from unittest.mock import MagicMock
+from src.managers.qobuz_manager import QobuzManager
 
-class BaseManager(ABC):
-    def __init__(self, display_manager, volumio_listener, mode_manager):
-        self.display_manager = display_manager
-        self.volumio_listener = volumio_listener
-        self.mode_manager = mode_manager
-        self.is_active = False
-        self.on_mode_change_callbacks = []
+class TestQobuzManager(unittest.TestCase):
+    def setUp(self):
+        # Set up QobuzManager with mocked dependencies
+        self.display_manager = MagicMock()
+        self.volumio_listener = MagicMock()
+        self.mode_manager = MagicMock()
 
-    @abstractmethod
-    def start_mode(self):
-        pass
+        # Instantiate QobuzManager with mocks
+        self.qobuz_manager = QobuzManager(
+            display_manager=self.display_manager,
+            volumio_listener=self.volumio_listener,
+            mode_manager=self.mode_manager
+        )
 
-    @abstractmethod
-    def stop_mode(self):
-        pass
+    def test_update_qobuz_playlists(self):
+        # Mock playlist data
+        mock_playlists = [
+            {"title": "Chill Vibes", "uri": "qobuz:playlist:1"},
+            {"title": "Top Hits", "uri": "qobuz:playlist:2"}
+        ]
+        
+        # Call the method to update playlists
+        self.qobuz_manager.update_qobuz_playlists(mock_playlists)
 
-    def add_on_mode_change_callback(self, callback):
-        if callable(callback):
-            self.on_mode_change_callbacks.append(callback)
+        # Explicitly call the method to display playlists if needed
+        self.qobuz_manager.display_qobuz_playlists()
 
-    def notify_mode_change(self, mode):
-        for callback in self.on_mode_change_callbacks:
-            try:
-                callback(mode)
-            except Exception as e:
-                print(f"BaseManager: Error in callback {callback}: {e}")
+        # Check that the playlists have been updated correctly
+        self.assertEqual(len(self.qobuz_manager.qobuz_playlists), 2)
+        self.assertEqual(self.qobuz_manager.qobuz_playlists[0]["title"], "Chill Vibes")
+        self.assertEqual(self.qobuz_manager.qobuz_playlists[1]["title"], "Top Hits")
 
-    def clear_display(self):
-        self.display_manager.clear_screen()
+        # Verify that the display manager's method was called to display the playlists
+        self.display_manager.draw_custom.assert_called_once()
+
+if __name__ == '__main__':
+    unittest.main()
 
 
-# File: mode_manager.py
-# src/managers/mode_manager.py
+# File: test_sample.py
+# test_playback_display.py
 
-from transitions import Machine
-import threading
+import time
 import logging
+from src.display.display_manager import DisplayManager
+from src.display.playback_manager import PlaybackManager
+from src.network.volumio_listener import VolumioListener
+from yaml import safe_load
 
-class ModeManager:
-    states = [
-        {'name': 'clock', 'on_enter': 'enter_clock'},
-        {'name': 'playback', 'on_enter': 'enter_playback'},
-        {'name': 'menu', 'on_enter': 'enter_menu'},
-        {'name': 'webradio', 'on_enter': 'enter_webradio'},
-        {'name': 'playlist', 'on_enter': 'enter_playlist'},
-        {'name': 'favourites', 'on_enter': 'enter_favourites'},
-        {'name': 'tidal', 'on_enter': 'enter_tidal'},
-    ]
+# Load configuration for DisplayManager
+with open('config.yaml', 'r') as config_file:
+    config = safe_load(config_file)
 
-    def __init__(self, display_manager, clock, playback_manager, menu_manager, playlist_manager, radio_manager, tidal_manager, qobuz_manager):
-        self.display_manager = display_manager
-        self.clock = clock
-        self.playback_manager = playback_manager
-        self.menu_manager = menu_manager
-        self.playlist_manager = playlist_manager
-        self.radio_manager = radio_manager
-        self.tidal_manager = tidal_manager
-        self.qobuz_manager = qobuz_manager
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("PlaybackTest")
 
-        # Set up logging
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.DEBUG)  # Adjust as needed
+def main():
+    # Initialize DisplayManager with configuration
+    display_manager = DisplayManager(config)
+    logger.info("DisplayManager initialized.")
 
-        self.machine = Machine(
-            model=self,
-            states=ModeManager.states,
-            initial='clock',
-            auto_transitions=False
-        )
+    # Initialize VolumioListener to connect to Volumio's WebSocket API
+    volumio_listener = VolumioListener(host='localhost', port=3000)
+    logger.info("VolumioListener initialized.")
 
-        # Define transitions without 'before' since 'on_enter' handles method calls
-        self.machine.add_transition(trigger='to_playback', source='*', dest='playback')
-        self.machine.add_transition(trigger='to_menu', source='*', dest='menu')
-        self.machine.add_transition(trigger='to_webradio', source='*', dest='webradio')
-        self.machine.add_transition(trigger='to_playlist', source='*', dest='playlist')
-        self.machine.add_transition(trigger='to_favourites', source='*', dest='favourites')
-        self.machine.add_transition(trigger='to_tidal', source='*', dest='tidal')
-        self.machine.add_transition(trigger='to_clock', source='*', dest='clock')
+    # Initialize PlaybackManager with DisplayManager and VolumioListener
+    playback_manager = PlaybackManager(display_manager=display_manager,
+                                       volumio_listener=volumio_listener,
+                                       mode_manager=None)  # Assuming mode_manager isn't needed for this test
 
-        self.on_mode_change_callbacks = []
-        self.lock = threading.Lock()
+    logger.info("PlaybackManager initialized.")
+    
+    # Start listening to playback events
+    playback_manager.start_mode()
+    logger.info("Playback mode started.")
 
-        # Explicitly call 'enter_clock' to ensure initial state is set
-        self.enter_clock()
+    try:
+        # Keep the script running to listen and update the display
+        while True:
+            # Refresh the display based on any updates from Volumio
+            playback_manager.display_current_track()
+            time.sleep(1)
 
-    # Define enter methods with 'event' parameter
-    def enter_playback(self, event=None):
-        self.logger.debug("Entering playback mode.")
-        self.clock.stop()  # Stop clock mode if active
-        self.menu_manager.stop_mode()  # Stop other modes if necessary
+    except KeyboardInterrupt:
+        logger.info("Test script interrupted. Stopping...")
+        playback_manager.stop_mode()
+        display_manager.clear_screen()
+        logger.info("Playback mode stopped and screen cleared.")
 
-        # Start playback display through PlaybackManager
-        self.playback_manager.start_mode()
-        self.notify_mode_change('playback')
-
-    def enter_menu(self, event=None):
-        self.logger.debug("Entering menu mode.")
-        self.clock.stop()
-        self.playback_manager.stop()
-        self.radio_manager.stop_mode()
-        self.playlist_manager.stop_mode()
-        self.tidal_manager.stop_mode()
-        self.menu_manager.start_mode()
-        self.notify_mode_change('menu')
-
-    def enter_webradio(self, event=None):
-        self.logger.debug("Entering webradio mode.")
-        self.clock.stop()
-        self.playback_manager.stop()
-        self.menu_manager.stop_mode()
-        self.playlist_manager.stop_mode()
-        self.tidal_manager.stop_mode()
-        self.radio_manager.start_mode()
-        self.notify_mode_change('webradio')
-
-    def enter_playlist(self, event=None):
-        self.logger.debug("Entering playlist mode.")
-        self.clock.stop()
-        self.playback_manager.stop()
-        self.menu_manager.stop_mode()
-        self.radio_manager.stop_mode()
-        self.tidal_manager.stop_mode()
-        self.playlist_manager.start_mode()
-        self.notify_mode_change('playlist')
-
-    def enter_favourites(self, event=None):
-        self.logger.debug("Entering favourites mode.")
-        self.clock.stop()
-        self.playback_manager.stop()
-        self.menu_manager.stop_mode()
-        self.radio_manager.stop_mode()
-        self.playlist_manager.stop_mode()
-        self.tidal_manager.stop_mode()
-        # Implement favourites mode logic here
-        self.notify_mode_change('favourites')
-
-    def enter_tidal(self, event=None):
-        self.logger.debug("Entering tidal mode.")
-        self.clock.stop()
-        self.playback_manager.stop()
-        self.menu_manager.stop_mode()
-        self.radio_manager.stop_mode()
-        self.playlist_manager.stop_mode()
-        self.tidal_manager.start_mode()
-        self.notify_mode_change('tidal')
-
-    def enter_clock(self, event=None):
-        self.logger.debug("Entering clock mode.")
-        self.playback_manager.stop_mode()  # Stop playback display
-        self.clock.start()  # Start clock display
-        self.notify_mode_change('clock')
-
-    def process_state_change(self, state):
-        status = state.get("status", "")
-        self.logger.debug("Processing state change, Volumio status: {}".format(status))
-        
-        if status == "play":
-            self.to_playback()  # Switch to playback mode if playing
-        elif status in ["pause", "stop"]:
-            self.to_clock()  # Return to clock mode if paused or stopped
-
-    def add_on_mode_change_callback(self, callback):
-        with self.lock:
-            if callable(callback):
-                self.on_mode_change_callbacks.append(callback)
-                self.logger.debug(f"Added mode change callback: {callback}")
-
-    def notify_mode_change(self, current_mode):
-        """Notify listeners of the mode change."""
-        with self.lock:
-            self.logger.debug(f"Notifying mode change to: {current_mode}")
-            for callback in self.on_mode_change_callbacks:
-                try:
-                    callback(current_mode)
-                except Exception as e:
-                    self.logger.error(f"ModeManager: Error in callback {callback}: {e}")
-
-            # Notify DisplayManager directly
-            if hasattr(self.display_manager, "notify_mode_change"):
-                self.display_manager.notify_mode_change(current_mode)
-
-    def get_mode(self):
-        return self.state
-
-    def stop(self):
-        """Optional: Method to clean up if needed."""
-        pass
+if __name__ == "__main__":
+    main()
 
 
-# File: radio_manager.py
-# src/managers/radio_manager.py
-from src.managers.base_manager import BaseManager
+# File: test_menu_manager.py
+import pytest
+from unittest.mock import MagicMock
+from src.managers.menu_manager import MenuManager
+
+@pytest.fixture
+def menu_manager():
+    # Mock dependencies for MenuManager
+    display_manager = MagicMock()
+    volumio_listener = MagicMock()
+    mode_manager = MagicMock()
+
+    # Initialize MenuManager with mocks
+    return MenuManager(
+        display_manager=display_manager,
+        volumio_listener=volumio_listener,
+        mode_manager=mode_manager
+    )
+
+def test_start_mode(menu_manager):
+    """Test that start_mode activates menu and displays it."""
+    menu_manager.start_mode()
+    assert menu_manager.is_active is True
+    assert menu_manager.current_selection_index == 0
+    menu_manager.display_manager.draw_custom.assert_called_once()
+
+def test_stop_mode(menu_manager):
+    """Test that stop_mode deactivates menu and clears display."""
+    menu_manager.start_mode()  # Start first to activate
+    menu_manager.stop_mode()
+    assert menu_manager.is_active is False
+    print(f"clear_display call count: {menu_manager.display_manager.clear_display.call_count}")
+    menu_manager.display_manager.clear_display.assert_called_once()  # Ensure clear_display is called once
+
+def test_display_menu(menu_manager):
+    """Test that display_menu draws the current menu with correct selection."""
+    menu_manager.start_mode()  # Ensures menu is active
+    menu_manager.display_menu()
+    menu_manager.display_manager.draw_custom.assert_called()  # Verifies draw_custom is called
+
+def test_scroll_selection(menu_manager):
+    """Test that scroll_selection updates the selection index and redraws menu."""
+    menu_manager.start_mode()  # Ensures menu is active
+    initial_index = menu_manager.current_selection_index
+    menu_manager.scroll_selection(1)  # Scroll down
+    assert menu_manager.current_selection_index == (initial_index + 1) % len(menu_manager.current_menu_items)
+    menu_manager.display_manager.draw_custom.assert_called()
+
+def test_select_item(menu_manager):
+    """Test that selecting an item triggers the correct mode transition."""
+    menu_manager.start_mode()  # Ensures menu is active
+
+    # Set index to "Webradio" and select item
+    menu_manager.current_selection_index = menu_manager.current_menu_items.index("Webradio")
+    menu_manager.select_item()
+    menu_manager.mode_manager.to_webradio.assert_called_once()
+
+    # Set index to "Playlists" and select item
+    menu_manager.mode_manager.reset_mock()  # Reset the mock to verify only one call
+    menu_manager.current_selection_index = menu_manager.current_menu_items.index("Playlists")
+    menu_manager.select_item()
+    menu_manager.mode_manager.to_playlist.assert_called_once()
+
+    # Set index to "Favourites" and select item
+    menu_manager.mode_manager.reset_mock()
+    menu_manager.current_selection_index = menu_manager.current_menu_items.index("Favourites")
+    menu_manager.select_item()
+    menu_manager.mode_manager.to_favourites.assert_called_once()
+
+
+
+
+
+# File: test_main.py
+import pytest
+from unittest.mock import MagicMock, patch
 import logging
-from PIL import Image, ImageDraw
-import threading
+from src.main import main
 
-class RadioManager(BaseManager):
-    def __init__(self, display_manager, volumio_listener, mode_manager):
-        super().__init__(display_manager, volumio_listener, mode_manager)
-        self.radio_stations = []
-        self.current_selection_index = 0
-        self.font_key = 'menu_font'  # Define in config.yaml under fonts
-        self.logger = logging.getLogger(self.__class__.__name__)
-        
-        # Connect to VolumioListener signals
-        self.volumio_listener.webradio_received.connect(self.update_radio_stations)
-        
-        # Register mode change callback
-        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
-        
-        self.lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
-    def start_mode(self):
-        self.is_active = True
-        self.current_selection_index = 0
-        if not self.radio_stations:
-            print("No radio stations available, displaying loading screen...")
-            self.display_loading_screen()
-            self.volumio_listener.fetch_webradio_stations()
-        else:
-            print("Calling display_radio_stations in start_mode...")
-            self.display_radio_stations()
+@pytest.fixture
+def mock_container():
+    # Create a mock container
+    container = MagicMock()
+
+    # Mock display_manager and its methods
+    container.display_manager = MagicMock()
+    container.display_manager.startup_sequence = MagicMock()
+
+    # Mock VolumioListener and other components as needed
+    container.volumio_listener = MagicMock()
+    container.mode_manager = MagicMock()
+    container.menu_manager = MagicMock()
+    container.playlist_manager = MagicMock()
+    container.radio_manager = MagicMock()
+    container.tidal_manager = MagicMock()
+    container.qobuz_manager = MagicMock()
+    container.playback = MagicMock()
+    container.rotary_control = MagicMock()
+    container.button_led_controller = MagicMock()
+    container.state_handler = MagicMock()
+    container.config.from_yaml = MagicMock()
+
+    return container
+
+@patch('src.main.setup_logging')
+@patch('src.main.atexit.register')
+@patch('src.main.GPIO.cleanup')
+@patch('src.main.time.sleep', side_effect=KeyboardInterrupt)  # Stop the infinite loop
+@patch('src.main.VolumioListener', autospec=True)
+def test_main(
+    mock_volumio_listener,
+    mock_sleep,
+    mock_gpio_cleanup,
+    mock_atexit_register,
+    mock_setup_logging,
+    mock_container  # Use the fixture here
+):
+    """Test the main function with mocked dependencies."""
+    
+    # Wire the mock container into the main function
+    with patch('src.main.Container', return_value=mock_container):
+        # Ensure mock_volumio_listener has proper signals mocked
+        volumio_instance = mock_volumio_listener.return_value
+        # Mock the connect method for each signal in VolumioListener
+        for signal_name in [
+            'state_changed', 'playlists_received', 'webradio_received',
+            'tidal_playlists_received', 'qobuz_playlists_received', 'track_changed'
+        ]:
+            signal = getattr(volumio_instance, signal_name)
+            signal.connect = MagicMock()
+
+        # Run the main function
+        try:
+            main(container=mock_container)
+        except KeyboardInterrupt:
+            # Expected exit due to the `KeyboardInterrupt` in sleep
+            pass
+
+        # Assertions to check if initialization is done correctly
+        mock_setup_logging.assert_called_once()
+        mock_container.config.from_yaml.assert_called_once_with('config.yaml')
+
+        # Check that startup_sequence or other display methods are called as expected
+        mock_container.display_manager.startup_sequence.assert_called_once()
+
+        # Verify that each signal's connect method was called once
+        volumio_instance.state_changed.connect.assert_called_once()
+        volumio_instance.playlists_received.connect.assert_called_once()
+        volumio_instance.webradio_received.connect.assert_called_once()
+        volumio_instance.tidal_playlists_received.connect.assert_called_once()
+        volumio_instance.qobuz_playlists_received.connect.assert_called_once()
+        volumio_instance.track_changed.connect.assert_called_once()
 
 
-    def stop_mode(self):
-        self.is_active = False
-        self.clear_display()
-        self.display_manager.clear_display()
+# File: test_tidal_manager.py
+import unittest
+from unittest.mock import MagicMock
+from src.managers.tidal_manager import TidalManager
 
-    def update_radio_stations(self, stations):
-        with self.lock:
-            self.radio_stations = stations or []
-            self.logger.debug(f"Updated radio stations: {[station['title'] for station in self.radio_stations]}")
-            if self.is_active and self.radio_stations:
-                self.display_radio_stations()
-            elif self.is_active:
-                self.display_no_stations()
+class TestTidalManager(unittest.TestCase):
+    def setUp(self):
+        # Set up TidalManager with mocked dependencies
+        self.display_manager = MagicMock()
+        self.volumio_listener = MagicMock()
+        self.mode_manager = MagicMock()
 
-    def display_radio_stations(self):
-        print("Displaying radio stations")
-        def draw(draw_obj):
-            y_offset = 10
-            for i, station in enumerate(self.radio_stations):
-                arrow = "-> " if i == self.current_selection_index else "   "
-                draw_obj.text(
-                    (10, y_offset + i * 15),
-                    f"{arrow}{station['title']}",
-                    font=self.display_manager.fonts[self.font_key],
-                    fill="white" if i == self.current_selection_index else "gray"
-                )
-        self.display_manager.draw_custom(draw)
-        print("draw_custom called")
-
-    def scroll_selection(self, direction):
-        if not self.is_active:
-            return
-        with self.lock:
-            self.current_selection_index = (self.current_selection_index + direction) % len(self.radio_stations)
-            self.display_radio_stations()
-            self.logger.debug(f"Scrolled to radio station index: {self.current_selection_index}")
-
-    def select_item(self):
-        if not self.is_active or not self.radio_stations:
-            return
-        selected_station = self.radio_stations[self.current_selection_index]
-        self.logger.info(f"Selected radio station: {selected_station['title']}")
-        self.volumio_listener.play_webradio_station(
-            title=selected_station['title'],
-            uri=selected_station['uri']
+        # Instantiate TidalManager with mocks
+        self.tidal_manager = TidalManager(
+            display_manager=self.display_manager,
+            volumio_listener=self.volumio_listener,
+            mode_manager=self.mode_manager
         )
 
-    def display_loading_screen(self):
-        self.display_manager.display_text(
-            "Loading Radios...",
-            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
-            font_key='menu_font'
-        )
-        self.logger.debug("Displayed loading screen for radio stations.")
-
-    def display_no_stations(self):
-        self.display_manager.display_text(
-            "No Radios Found",
-            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
-            font_key='menu_font'
-        )
-        self.logger.warning("No radio stations available to display.")
-
-    def handle_mode_change(self, current_mode):
-        if current_mode == "webradio":
-            print("Starting webradio mode")
-            self.start_mode()
-        elif self.is_active:
-            print("Stopping webradio mode")
-            self.stop_mode()
-
-
-# File: tidal_manager.py
-# src/managers/tidal_manager.py
-from src.managers.base_manager import BaseManager
-import logging
-from PIL import Image, ImageDraw
-import threading
-
-class TidalManager(BaseManager):
-    def __init__(self, display_manager, volumio_listener, mode_manager):
-        super().__init__(display_manager, volumio_listener, mode_manager)
-        self.tidal_playlists = []
-        self.current_selection_index = 0
-        self.font_key = 'menu_font'  # Define in config.yaml under fonts
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.mode_manager = mode_manager
+    def test_update_tidal_playlists(self):
+        # Mock playlist data
+        mock_playlists = [
+            {"title": "Top Tracks", "uri": "tidal:playlist:1"},
+            {"title": "Pop Hits", "uri": "tidal:playlist:2"}
+        ]
         
-        # Connect to VolumioListener signals
-        self.volumio_listener.qobuz_playlists_received.connect(self.update_tidal_playlists)  # Assuming same signal for Tidal
-        # If Tidal has separate signals, adjust accordingly
-        
-        # Register mode change callback
-        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
-        
-        self.lock = threading.Lock()
+        # Call the method to update playlists
+        self.tidal_manager.update_tidal_playlists(mock_playlists)
 
-    def start_mode(self):
-        self.is_active = True
-        self.current_selection_index = 0
-        if not self.tidal_playlists:
-            self.display_loading_screen()
-            self.volumio_listener.fetch_tidal_playlists()  # Ensure this method exists
-        else:
-            self.display_tidal_playlists()
+        # Explicitly call the method to display playlists if needed
+        self.tidal_manager.display_tidal_playlists()
 
-    def stop_mode(self):
-        self.is_active = False
-        self.clear_display()
+        # Check that the playlists have been updated correctly
+        self.assertEqual(len(self.tidal_manager.tidal_playlists), 2)
+        self.assertEqual(self.tidal_manager.tidal_playlists[0]["title"], "Top Tracks")
+        self.assertEqual(self.tidal_manager.tidal_playlists[1]["title"], "Pop Hits")
 
-    def update_tidal_playlists(self, playlists):
-        with self.lock:
-            self.tidal_playlists = playlists or []
-            self.logger.debug(f"Updated Tidal playlists: {[playlist['title'] for playlist in self.tidal_playlists]}")
-            if self.is_active:
-                if self.tidal_playlists:
-                    self.display_tidal_playlists()
-                else:
-                    self.display_no_playlists()
+        # Verify that the display manager's method was called to display the playlists
+        self.display_manager.draw_custom.assert_called_once()
 
-    def display_tidal_playlists(self):
-        def draw(draw_obj):
-            y_offset = 10
-            for i, playlist in enumerate(self.tidal_playlists):
-                arrow = "-> " if i == self.current_selection_index else "   "
-                draw_obj.text(
-                    (10, y_offset + i * 15),
-                    f"{arrow}{playlist['title']}",
-                    font=self.display_manager.fonts[self.font_key],
-                    fill="white" if i == self.current_selection_index else "gray"
-                )
-        self.display_manager.draw_custom(draw)
-        self.logger.debug("Displayed Tidal playlists.")
-
-    def scroll_selection(self, direction):
-        if not self.is_active:
-            return
-        with self.lock:
-            self.current_selection_index = (self.current_selection_index + direction) % len(self.tidal_playlists)
-            self.display_tidal_playlists()
-            self.logger.debug(f"Scrolled to Tidal playlist index: {self.current_selection_index}")
-
-    def select_item(self):
-        if not self.is_active or not self.tidal_playlists:
-            return
-        selected_playlist = self.tidal_playlists[self.current_selection_index]
-        self.logger.info(f"Selected Tidal playlist: {selected_playlist['title']}")
-        self.volumio_listener.play_tidal_playlist(
-            title=selected_playlist['title'],
-            uri=selected_playlist['uri']
-        )
-
-    def display_loading_screen(self):
-        self.display_manager.display_text(
-            "Loading Tidal Playlists...",
-            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
-            font_key='menu_font'
-        )
-        self.logger.debug("Displayed loading screen for Tidal playlists.")
-
-    def display_no_playlists(self):
-        self.display_manager.display_text(
-            "No Tidal Playlists Found",
-            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
-            font_key='menu_font'
-        )
-        self.logger.warning("No Tidal playlists available to display.")
-
-    def handle_mode_change(self, current_mode):
-        if current_mode == "tidal":
-            self.start_mode()
-        else:
-            if self.is_active:
-                self.stop_mode()
-
-# File: menu_manager.py
-# src/managers/menu_manager.py
-
-from src.managers.base_manager import BaseManager
-import logging
-from PIL import Image, ImageDraw, ImageFont
-
-class MenuManager(BaseManager):
-    def __init__(self, display_manager, volumio_listener, mode_manager):
-        super().__init__(display_manager, volumio_listener, mode_manager)
-        self.menu_stack = []
-        self.current_menu_items = ["Webradio", "Playlists", "Favourites", "Tidal", "Qobuz"]
-        self.current_selection_index = 0
-        self.font_key = 'menu_font'  # Define in config.yaml under fonts
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.INFO)  # Adjust as needed
-        self.logger.info("MenuManager initialized.")
-
-        # Register mode change callback
-        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
-
-    def start_mode(self):
-        self.is_active = True
-        self.current_selection_index = 0
-        self.display_menu()
-        self.logger.info("MenuManager: Started menu mode.")
-
-    def stop_mode(self):
-        self.is_active = False
-        self.display_manager.clear_display()  # Ensure this line exists
-        self.logger.info("MenuManager: Stopped menu mode.")
-
-    def display_menu(self):
-        def draw(draw_obj):
-            y_offset = 10
-            for i, item in enumerate(self.current_menu_items):
-                arrow = "-> " if i == self.current_selection_index else "   "
-                draw_obj.text(
-                    (10, y_offset + i * 15),
-                    f"{arrow}{item}",
-                    font=self.display_manager.fonts[self.font_key],
-                    fill="white" if i == self.current_selection_index else "gray"
-                )
-        self.display_manager.draw_custom(draw)
-        self.logger.info("MenuManager: Displayed menu.")
-
-    def scroll_selection(self, direction):
-        if not self.is_active:
-            return
-        self.current_selection_index = (self.current_selection_index + direction) % len(self.current_menu_items)
-        self.display_menu()
-        self.logger.debug(f"MenuManager: Scrolled to selection index: {self.current_selection_index}")
-
-    def select_item(self):
-        if not self.is_active or not self.current_menu_items:
-            return
-        selected_item = self.current_menu_items[self.current_selection_index]
-        self.logger.info(f"MenuManager: Selected menu item: {selected_item}")
-        if selected_item == "Webradio":
-            self.mode_manager.to_webradio()
-        elif selected_item == "Playlists":
-            self.mode_manager.to_playlist()
-        elif selected_item == "Favourites":
-            self.mode_manager.to_favourites()
-        elif selected_item == "Tidal":
-            self.mode_manager.to_tidal()
-        elif selected_item == "Qobuz":
-            self.mode_manager.to_qobuz()
-
-    def handle_mode_change(self, current_mode):
-        if current_mode == "menu":
-            self.start_mode()
-        else:
-            if self.is_active:
-                self.stop_mode()
+if __name__ == '__main__':
+    unittest.main()
 
 
 # File: __init__.py
 
 
-# File: manager_factory.py
-# src/managers/manager_factory.py
-class ManagerFactory:
-    def __init__(self, display_manager, volumio_listener, mode_manager):
-        self.display_manager = display_manager
-        self.volumio_listener = volumio_listener
-        self.mode_manager = mode_manager
-
-    def create_menu_manager(self):
-        from src.managers.menu_manager import MenuManager
-        return MenuManager(self.display_manager, self.volumio_listener, self.mode_manager)
-
-    def create_playlist_manager(self):
-        from src.managers.playlist_manager import PlaylistManager
-        return PlaylistManager(self.display_manager, self.volumio_listener, self.mode_manager)
-
-    def create_radio_manager(self):
-        from src.managers.radio_manager import RadioManager
-        return RadioManager(self.display_manager, self.volumio_listener, self.mode_manager)
-
-    def create_tidal_manager(self):
-        from src.managers.tidal_manager import TidalManager
-        return TidalManager(self.display_manager, self.volumio_listener, self.mode_manager)
-
-    def create_qobuz_manager(self):
-        from src.managers.qobuz_manager import QobuzManager
-        return QobuzManager(self.display_manager, self.volumio_listener, self.mode_manager)
-    
-    # Add methods for other managers as needed
-
-
-
-# File: qobuz_manager.py
-# src/managers/qobuz_manager.py
-
-from src.managers.base_manager import BaseManager
-import logging
-from PIL import Image, ImageDraw
-import threading
-
-class QobuzManager(BaseManager):
-    def __init__(self, display_manager, volumio_listener, mode_manager):
-        super().__init__(display_manager, volumio_listener, mode_manager)
-        self.qobuz_playlists = []
-        self.current_selection_index = 0
-        self.font_key = 'menu_font'  # Define in config.yaml under fonts
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.mode_manager = mode_manager
-        
-        # Connect to VolumioListener signals
-        self.volumio_listener.qobuz_playlists_received.connect(self.update_qobuz_playlists)
-        # If Qobuz has separate signals, adjust accordingly
-        
-        # Register mode change callback
-        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
-        
-        self.lock = threading.Lock()
-
-    def start_mode(self):
-        self.is_active = True
-        self.current_selection_index = 0
-        if not self.qobuz_playlists:
-            self.display_loading_screen()
-            self.volumio_listener.fetch_qobuz_playlists()  # Ensure this method exists
-        else:
-            self.display_qobuz_playlists()
-
-    def stop_mode(self):
-        self.is_active = False
-        self.clear_display()
-
-    def update_qobuz_playlists(self, playlists):
-        with self.lock:
-            self.qobuz_playlists = playlists or []
-            self.logger.debug(f"Updated Qobuz playlists: {[playlist['title'] for playlist in self.qobuz_playlists]}")
-            if self.is_active:
-                if self.qobuz_playlists:
-                    self.display_qobuz_playlists()
-                else:
-                    self.display_no_playlists()
-
-    def display_qobuz_playlists(self):
-        def draw(draw_obj):
-            y_offset = 10
-            for i, playlist in enumerate(self.qobuz_playlists):
-                arrow = "-> " if i == self.current_selection_index else "   "
-                draw_obj.text(
-                    (10, y_offset + i * 15),
-                    f"{arrow}{playlist['title']}",
-                    font=self.display_manager.fonts[self.font_key],
-                    fill="white" if i == self.current_selection_index else "gray"
-                )
-        self.display_manager.draw_custom(draw)
-        self.logger.debug("Displayed Qobuz playlists.")
-
-    def scroll_selection(self, direction):
-        if not self.is_active:
-            return
-        with self.lock:
-            self.current_selection_index = (self.current_selection_index + direction) % len(self.qobuz_playlists)
-            self.display_qobuz_playlists()
-            self.logger.debug(f"Scrolled to Qobuz playlist index: {self.current_selection_index}")
-
-    def select_item(self):
-        if not self.is_active or not self.qobuz_playlists:
-            return
-        selected_playlist = self.qobuz_playlists[self.current_selection_index]
-        self.logger.info(f"Selected Qobuz playlist: {selected_playlist['title']}")
-        self.volumio_listener.play_qobuz_playlist(
-            title=selected_playlist['title'],
-            uri=selected_playlist['uri']
-        )
-
-    def display_loading_screen(self):
-        self.display_manager.display_text(
-            "Loading Qobuz Playlists...",
-            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
-            font_key='menu_font'
-        )
-        self.logger.debug("Displayed loading screen for Qobuz playlists.")
-
-    def display_no_playlists(self):
-        self.display_manager.display_text(
-            "No Qobuz Playlists Found",
-            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
-            font_key='menu_font'
-        )
-        self.logger.warning("No Qobuz playlists available to display.")
-
-    def handle_mode_change(self, current_mode):
-        if current_mode == "qobuz":
-            self.start_mode()
-        else:
-            if self.is_active:
-                self.stop_mode()
-
-
-
-# File: playlist_manager.py
-# src/managers/playlist_manager.py
-from src.managers.base_manager import BaseManager
-
-class PlaylistManager(BaseManager):
-    def __init__(self, display_manager, volumio_listener, mode_manager):
-        super().__init__(display_manager, volumio_listener, mode_manager)
-        self.playlists = []
-        self.current_selection_index = 0
-        self.font_key = 'menu_font'  # Define in config.yaml under fonts
-        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
-
-    def start_mode(self):
-        self.is_active = True
-        self.current_selection_index = 0
-        if not self.playlists:
-            self.display_loading_screen()
-            self.volumio_listener.fetch_playlists()
-        else:
-            self.display_playlists()
-
-    def stop_mode(self):
-        self.is_active = False
-        self.clear_display()
-
-    def update_playlists(self, playlists):
-        self.playlists = playlists or []
-        if self.is_active:
-            if self.playlists:
-                self.display_playlists()
-            else:
-                self.display_no_playlists()
-
-    def display_playlists(self):
-        def draw(draw_obj):
-            y_offset = 10
-            for i, playlist in enumerate(self.playlists):
-                arrow = "-> " if i == self.current_selection_index else "   "
-                draw_obj.text(
-                    (10, y_offset + i * 15),
-                    f"{arrow}{playlist['title']}",
-                    font=self.display_manager.fonts[self.font_key],
-                    fill="white" if i == self.current_selection_index else "gray"
-                )
-        self.display_manager.draw_custom(draw)
-
-    def scroll_selection(self, direction):
-        if not self.is_active:
-            return
-        self.current_selection_index = (self.current_selection_index + direction) % len(self.playlists)
-        self.display_playlists()
-
-    def select_item(self):
-        if not self.is_active or not self.playlists:
-            return
-        selected_playlist = self.playlists[self.current_selection_index]
-        self.volumio_listener.play_playlist(selected_playlist['title'])
-
-    def display_loading_screen(self):
-        self.display_manager.display_text(
-            "Loading Playlists...",
-            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
-            font_key='menu_font'
-        )
-
-    def display_no_playlists(self):
-        self.display_manager.display_text(
-            "No Playlists Found",
-            position=(self.display_manager.oled.width // 2, self.display_manager.oled.height // 2),
-            font_key='menu_font'
-        )
-
-    def handle_mode_change(self, current_mode):
-        if current_mode == "playlist":
-            self.start_mode()
-        else:
-            if self.is_active:
-                self.stop_mode()
-
-
-# File: concrete_base_manager.py
-# src/managers/concrete_base_manager.py
-
-from src.managers.base_manager import BaseManager
-from src.display.playback_manager import PlaybackManager
-from src.managers.menu_manager import MenuManager
-from src.managers.playlist_manager import PlaylistManager
+# File: test_radio_manager.py
+import pytest
+from unittest.mock import MagicMock
 from src.managers.radio_manager import RadioManager
-from src.managers.tidal_manager import TidalManager
-from src.managers.qobuz_manager import QobuzManager
 
-class ConcreteBaseManager(BaseManager):
-    def __init__(
-        self,
-        display_manager,
-        volumio_listener,
-        mode_manager,
-        playback_manager: PlaybackManager,
-        menu_manager: MenuManager,
-        playlist_manager: PlaylistManager,
-        radio_manager: RadioManager,
-        tidal_manager: TidalManager,
-        qobuz_manager: QobuzManager,
-    ):
-        # Pass required parameters to BaseManager
-        super().__init__(display_manager, volumio_listener, mode_manager)
+@pytest.fixture
+def radio_manager():
+    # Mock dependencies for RadioManager
+    display_manager = MagicMock()
+    volumio_listener = MagicMock()
+    mode_manager = MagicMock()
+
+    # Initialize RadioManager with mocks
+    return RadioManager(
+        display_manager=display_manager,
+        volumio_listener=volumio_listener,
+        mode_manager=mode_manager
+    )
+
+def test_start_mode_with_no_stations(radio_manager):
+    """Test that start_mode displays loading and fetches stations when list is empty."""
+    radio_manager.radio_stations = []  # Ensure the station list is empty
+    radio_manager.start_mode()
+    assert radio_manager.is_active is True
+    radio_manager.display_manager.display_text.assert_called_with(
+        "Loading Radios...",
+        position=(radio_manager.display_manager.oled.width // 2, radio_manager.display_manager.oled.height // 2),
+        font_key='menu_font'
+    )
+    radio_manager.volumio_listener.fetch_webradio_stations.assert_called_once()
+
+def test_start_mode_with_stations(radio_manager):
+    """Test that start_mode displays stations when list is populated."""
+    radio_manager.radio_stations = [{"title": "Station 1", "uri": "uri1"}]
+    radio_manager.start_mode()
+    assert radio_manager.is_active is True
+    radio_manager.display_manager.draw_custom.assert_called_once()
+
+def test_stop_mode(radio_manager):
+    """Test that stop_mode deactivates radio manager and clears display."""
+    radio_manager.start_mode()  # Start first to activate
+    radio_manager.stop_mode()
+    assert radio_manager.is_active is False
+    radio_manager.display_manager.clear_display.assert_called_once()
+
+def test_update_radio_stations(radio_manager):
+    """Test updating radio stations and displaying them."""
+    radio_manager.start_mode()  # Start the mode to ensure it is active
+    mock_stations = [
+        {"title": "Station 1", "uri": "uri1"},
+        {"title": "Station 2", "uri": "uri2"}
+    ]
+    radio_manager.update_radio_stations(mock_stations)
+    assert len(radio_manager.radio_stations) == 2
+    assert radio_manager.radio_stations[0]["title"] == "Station 1"
+    radio_manager.display_manager.draw_custom.assert_called_once()  # Verifies the display was updated
+
+
+def test_scroll_selection(radio_manager):
+    """Test that scroll_selection updates the selection index and redraws the stations."""
+    radio_manager.radio_stations = [{"title": "Station 1", "uri": "uri1"}, {"title": "Station 2", "uri": "uri2"}]
+    radio_manager.start_mode()  # Ensures mode is active
+    initial_index = radio_manager.current_selection_index
+    radio_manager.scroll_selection(1)  # Scroll down
+    assert radio_manager.current_selection_index == (initial_index + 1) % len(radio_manager.radio_stations)
+    radio_manager.display_manager.draw_custom.assert_called()
+
+def test_select_item(radio_manager):
+    """Test that selecting a radio station triggers playback."""
+    radio_manager.radio_stations = [{"title": "Station 1", "uri": "uri1"}, {"title": "Station 2", "uri": "uri2"}]
+    radio_manager.start_mode()  # Ensures mode is active
+    radio_manager.current_selection_index = 1  # Select the second station
+    radio_manager.select_item()
+    radio_manager.volumio_listener.play_webradio_station.assert_called_once_with(
+        title="Station 2",
+        uri="uri2"
+    )
+
+def test_handle_mode_change(radio_manager):
+    """Test that handle_mode_change starts or stops the radio manager based on mode."""
+    # Reset mock to ensure isolation from previous calls
+    radio_manager.display_manager.draw_custom.reset_mock()
+
+    # Add some mock stations to avoid the loading state
+    radio_manager.radio_stations = [
+        {"title": "Station 1", "uri": "uri1"},
+        {"title": "Station 2", "uri": "uri2"}
+    ]
+    
+    # When mode is "webradio", start_mode should be called
+    print("Handling mode change to 'webradio'")
+    radio_manager.handle_mode_change("webradio")
+    
+    assert radio_manager.is_active is True, "RadioManager should be active after changing mode to 'webradio'"
+    
+    # Adding a debug log to confirm we reached this step
+    print("Checking if draw_custom was called after handling 'webradio' mode change")
+    try:
+        radio_manager.display_manager.draw_custom.assert_called()
+    except AssertionError:
+        print("Failed: draw_custom was not called as expected.")
+        raise
+
+    # Reset mock for subsequent checks
+    radio_manager.display_manager.draw_custom.reset_mock()
+
+    # When mode changes away from "webradio", stop_mode should be called
+    print("Handling mode change to 'playback'")
+    radio_manager.handle_mode_change("playback")
+    
+    assert radio_manager.is_active is False, "RadioManager should not be active after changing mode to 'playback'"
+    radio_manager.display_manager.clear_display.assert_called()
+
+
+# File: test_containers.py
+# tests/test_containers.py
+
+import pytest
+from src.containers import Container
+from dependency_injector.providers import Configuration, Singleton, Factory
+from dependency_injector.errors import Error
+
+@pytest.fixture(scope="module")
+def container():
+    container = Container()
+    container.config.from_yaml("config.yaml")  # Ensure config.yaml path is correct or use a test-specific config
+    container.wire(modules=[__name__])
+    yield container
+    container.unwire()
+
+def test_container_initialization(container):
+    """Test that the container initializes without errors."""
+    assert isinstance(container.config, Configuration), "Config should be loaded as a Configuration instance."
+    assert isinstance(container.volumio_listener, Singleton), "VolumioListener should be a Singleton provider."
+    assert isinstance(container.playback_manager, Singleton), "PlaybackManager should be a Singleton provider."
+    assert isinstance(container.menu_manager, Singleton), "MenuManager should be a Singleton provider."
+
+def test_volumio_listener_initialization(container):
+    """Test that VolumioListener initializes correctly."""
+    volumio_listener = container.volumio_listener()
+    assert volumio_listener is not None, "VolumioListener should not be None"
+    assert hasattr(volumio_listener, 'connect'), "VolumioListener should have a connect method"
+    assert volumio_listener.is_connected == False, "VolumioListener should start disconnected"
+
+def test_mode_manager_initialization(container):
+    """Test that ModeManager initializes and has the correct states."""
+    mode_manager = container.mode_manager()
+    assert mode_manager is not None, "ModeManager should not be None"
+    assert mode_manager.state == 'clock', "ModeManager should initialize with 'clock' state"
+
+def test_display_manager_initialization(container):
+    """Test that DisplayManager initializes and is configured correctly."""
+    display_manager = container.display_manager()
+    assert display_manager is not None, "DisplayManager should not be None"
+    assert hasattr(display_manager, 'show_logo'), "DisplayManager should have a show_logo method"
+
+def test_playback_manager_initialization(container):
+    """Test that PlaybackManager initializes and depends on VolumioListener."""
+    playback_manager = container.playback_manager()
+    assert playback_manager is not None, "PlaybackManager should not be None"
+    assert playback_manager.volumio_listener is not None, "PlaybackManager should have access to VolumioListener"
+
+def test_menu_manager_initialization(container):
+    """Test that MenuManager initializes and uses DisplayManager."""
+    menu_manager = container.menu_manager()
+    assert menu_manager is not None, "MenuManager should not be None"
+    assert menu_manager.display_manager is not None, "MenuManager should use DisplayManager"
+
+def test_rotary_control_initialization(container):
+    """Test that RotaryControl initializes and has callback functions."""
+    rotary_control = container.rotary_control()
+    assert rotary_control is not None, "RotaryControl should not be None"
+    assert callable(rotary_control.rotation_callback), "RotaryControl should have a rotation callback"
+    assert callable(rotary_control.button_callback), "RotaryControl should have a button callback"
+
+def test_buttons_led_controller_initialization(container):
+    """Test that ButtonsLEDController initializes correctly with required dependencies."""
+    button_led_controller = container.buttons_led_controller()
+    assert button_led_controller is not None, "ButtonsLEDController should not be None"
+    assert hasattr(button_led_controller, 'start'), "ButtonsLEDController should have a start method"
+
+def test_mode_transitions(container):
+    """Test that ModeManager can transition between states as expected."""
+    mode_manager = container.mode_manager()
+
+    # Transition to 'playback' mode
+    mode_manager.to_playback()
+    assert mode_manager.state == 'playback', "ModeManager should transition to 'playback' mode"
+
+    # Transition back to 'clock' mode
+    mode_manager.to_clock()
+    assert mode_manager.state == 'clock', "ModeManager should transition back to 'clock' mode"
+
+def test_configuration_loaded(container):
+    """Verify that configuration values are loaded into components."""
+    config = container.config
+    assert config.volumio.host() == "localhost", "Expected host to be 'localhost'"
+    assert config.volumio.port() == 3000, "Expected port to be 3000"
+    assert config.buttons.debounce_delay() == 0.1, "Expected debounce_delay to be 0.1 seconds"
+
+def test_cleanup(container):
+    """Ensure cleanup operations are properly set."""
+    rotary_control = container.rotary_control()
+    button_led_controller = container.buttons_led_controller()
+    
+    # Call cleanup methods
+    rotary_control.stop()
+    button_led_controller.stop()
+    
+    # Verify cleanup actions if applicable (or use mocks if necessary)
+    assert not rotary_control.rotation_callback, "RotaryControl's rotation_callback should be unset after stop"
+    assert not button_led_controller, "ButtonLEDController should clean up properly"
+
+
+# File: test_display_manager.py
+import time
+from src.display.display_manager import DisplayManager
+from PIL import ImageDraw
+
+# Configuration dictionary with fonts and display settings
+config = {
+    'fonts': {
+        'default': {
+            'path': '/home/volumio/Quadifyclean/src/assets/fonts/OpenSans-Regular.ttf',
+            'size': 18
+        },
+        'playback_large': {
+            'path': '/home/volumio/Quadifyclean/src/assets/fonts/DSEG7Classic-Light.ttf',
+            'size': 45
+        },
+        'playback_medium': {
+            'path': '/home/volumio/Quadifyclean/src/assets/fonts/OpenSans-Regular.ttf',
+            'size': 18
+        },
+    },
+    'display': {
+        'logo_path': '/home/volumio/Quadifyclean/src/assets/images/logo.bmp'
+    }
+}
+
+# Initialize the DisplayManager with the configuration
+display_manager = DisplayManager(config=config)
+
+# Test 1: Display the logo image for 2 seconds, then clear
+print("Test 1: Displaying logo image.")
+display_manager.show_logo()
+time.sleep(2)
+display_manager.clear_screen()
+print("Screen cleared after logo display.\n")
+
+# Test 2: Display a custom image and resize to fit screen, then clear
+print("Test 2: Displaying custom image.")
+image_path = "/home/volumio/Quadifyclean/src/assets/images/tidal.bmp"
+display_manager.display_image(image_path, resize=True)
+time.sleep(2)
+display_manager.clear_screen()
+print("Screen cleared after custom image display.\n")
+
+# Test 3: Display text at various positions and sizes, then clear
+print("Test 3: Displaying text.")
+display_manager.display_text("Hello, World!", (10, 10), font_key='default')
+time.sleep(2)
+display_manager.clear_screen()
+
+display_manager.display_text("Large Text Test", (10, 30), font_key='playback_large')
+time.sleep(2)
+display_manager.clear_screen()
+print("Screen cleared after text display.\n")
+
+# Test 4: Draw custom shapes (lines, rectangles, circles) and clear
+def custom_drawing(draw):
+    draw.rectangle([0, 0, 50, 50], outline="white", fill="black")
+    draw.line([0, 0, 50, 50], fill="white", width=2)
+    draw.ellipse([20, 20, 60, 60], outline="white", fill="black")
+    draw.text((70, 30), "Shapes Test", font=display_manager.fonts['default'], fill="white")
+
+print("Test 4: Drawing custom shapes.")
+display_manager.draw_custom(custom_drawing)
+time.sleep(2)
+display_manager.clear_screen()
+print("Screen cleared after custom shapes display.\n")
+
+# Test 5: Startup sequence
+print("Test 5: Testing startup sequence.")
+display_manager.show_logo()
+time.sleep(2)  # Allow time for logo to display
+display_manager.clear_screen()
+print("Startup sequence complete.\n")
+
+# Test 6: Volume bar display using draw_custom
+def draw_volume_bars_test(draw):
+    volume = 75  # Example volume level (75%)
+    filled_squares = round((volume / 100) * 6)
+    square_size = 4
+    row_spacing = 4
+    padding_bottom = 12
+    columns = [8, 28]
+
+    for x in columns:
+        for row in range(6):
+            y = display_manager.oled.height - padding_bottom - ((row + 1) * (square_size + row_spacing))
+            if row < filled_squares:
+                draw.rectangle([x, y, x + square_size, y + square_size], fill="white")
+            else:
+                draw.rectangle([x, y, x + square_size, y + square_size], outline="white")
+
+print("Test 6: Displaying volume bars.")
+display_manager.draw_custom(draw_volume_bars_test)
+time.sleep(2)
+display_manager.clear_screen()
+print("Screen cleared after volume bars display.\n")
+
+# Test 7: Display multiple lines of text for readability testing
+print("Test 7: Displaying multiple lines of text.")
+display_manager.display_text("Line 1", (10, 10), font_key='default')
+display_manager.display_text("Line 2", (10, 30), font_key='default')
+display_manager.display_text("Line 3", (10, 50), font_key='default')
+time.sleep(2)
+display_manager.clear_screen()
+print("Screen cleared after multiple lines of text display.\n")
+
+# Final screen clear to ensure display is clean before ending test
+display_manager.clear_screen()
+print("All tests complete. Final screen clear executed.\n")
+
+
+# File: test_volumio_listener.py
+import pytest
+from unittest.mock import MagicMock, patch
+from src.network.volumio_listener import VolumioListener
+
+@pytest.fixture
+def volumio_listener():
+    """Fixture to initialize VolumioListener in test mode."""
+    return VolumioListener(test_mode=True)
+
+
+@patch('src.network.volumio_listener.socketio.Client')
+def test_connect(mock_socket_client_class, volumio_listener):
+    """Test that VolumioListener can successfully call connect on the socket client."""
+    volumio_listener.test_mode = False  # Temporarily disable test mode for this test
+    volumio_listener.socketIO = mock_socket_client_class.return_value
+
+    # Call connect method
+    volumio_listener.connect()
+
+    # Assert connect method was called with the expected arguments
+    volumio_listener.socketIO.connect.assert_called_once_with('http://localhost:3000')
+
+
+@patch('src.network.volumio_listener.socketio.Client')
+def test_emit_get_state(mock_socket_client_class, volumio_listener):
+    """Test that the VolumioListener emits the 'getState' event upon connecting."""
+    volumio_listener.test_mode = False
+    volumio_listener.socketIO = mock_socket_client_class.return_value
+
+    # Call connect and simulate on_connect
+    volumio_listener.connect()
+    volumio_listener.on_connect()
+
+    # Verify that 'getState' event is emitted
+    volumio_listener.socketIO.emit.assert_any_call("getState")
+
+
+@patch('src.network.volumio_listener.socketio.Client')
+def test_register_event_handlers(mock_socket_client_class, volumio_listener):
+    """Test that VolumioListener registers the expected event handlers."""
+    volumio_listener.test_mode = False
+    volumio_listener.socketIO = mock_socket_client_class.return_value
+
+    # Register events
+    volumio_listener.register_socketio_events()
+
+    # Ensure appropriate handlers are registered for events
+    volumio_listener.socketIO.on.assert_any_call('connect', volumio_listener.on_connect)
+    volumio_listener.socketIO.on.assert_any_call('disconnect', volumio_listener.on_disconnect)
+    volumio_listener.socketIO.on.assert_any_call('pushState', volumio_listener.on_push_state)
+    volumio_listener.socketIO.on.assert_any_call('pushBrowseLibrary', volumio_listener.on_push_browse_library)
+    volumio_listener.socketIO.on.assert_any_call('pushTrack', volumio_listener.on_push_track)
+
+
+def test_handle_push_state(volumio_listener):
+    """Test the on_push_state method to ensure it triggers the state_changed signal."""
+    mock_callback = MagicMock()
+    volumio_listener.state_changed.connect(mock_callback)
+
+    # Simulate a state change event
+    test_state = {"status": "play", "artist": "Test Artist", "title": "Test Track"}
+    volumio_listener.on_push_state(test_state)
+
+    # Verify the callback was called with the test state
+    mock_callback.assert_called_once_with(state=test_state)
+
+
+def test_handle_push_browse_library(volumio_listener):
+    """Test the on_push_browse_library method for playlist and webradio handling."""
+    mock_playlists_callback = MagicMock()
+    volumio_listener.playlists_received.connect(mock_playlists_callback)
+
+    # Simulate a pushBrowseLibrary event for playlists
+    test_data = {
+        "uri": "playlists",
+        "navigation": {"lists": [{"items": [{"title": "Test Playlist", "uri": "playlist_uri"}]}]}
+    }
+    volumio_listener.on_push_browse_library(test_data)
+
+    # Verify that the playlists_received signal was emitted
+    expected_playlists = [{"title": "Test Playlist", "uri": "playlist_uri"}]
+    mock_playlists_callback.assert_called_once_with(playlists=expected_playlists)
+
+
+def test_handle_push_track(volumio_listener):
+    """Test that the on_push_track method triggers the track_changed signal."""
+    mock_callback = MagicMock()
+    volumio_listener.track_changed.connect(mock_callback)
+
+    # Simulate a track change event
+    test_data = {"track": {"title": "Track Title", "artist": "Artist Name", "uri": "track_uri"}}
+    volumio_listener.on_push_track(test_data)
+
+    # Verify the callback was called with the track information
+    expected_track_info = {"title": "Track Title", "artist": "Artist Name", "albumart": "", "uri": "track_uri"}
+    mock_callback.assert_called_once_with(track_info=expected_track_info)
+
+
+def test_adjust_volume(volumio_listener):
+    """Test that adjust_volume correctly emits a volume change event."""
+    volumio_listener.socketIO = MagicMock()
+    volumio_listener.current_state = {"volume": 50}
+
+    # Adjust volume up by 10
+    volumio_listener.adjust_volume(10)
+    volumio_listener.socketIO.emit.assert_called_once_with("volume", 60)
+
+    # Adjust volume down by 20
+    volumio_listener.socketIO.reset_mock()
+    volumio_listener.adjust_volume(-20)
+    volumio_listener.socketIO.emit.assert_called_once_with("volume", 40)
+
+
+def test_schedule_reconnect(volumio_listener):
+    """Test that the schedule_reconnect method triggers a reconnect with backoff."""
+    volumio_listener.socketIO = MagicMock()
+    with patch("threading.Thread") as mock_thread:
+        volumio_listener.schedule_reconnect()
+        assert mock_thread.call_count == 1  # Ensures a reconnection thread is created
+
+
+def test_stop_listener(volumio_listener):
+    """Test that stop_listener stops the event loop and disconnects."""
+    volumio_listener.socketIO = MagicMock()
+    volumio_listener.stop_listener()
+
+    # Ensure the _running flag is set to False and disconnect is called
+    assert not volumio_listener._running
+    volumio_listener.socketIO.disconnect.assert_called_once()
+
+
+def test_play_webradio_station(volumio_listener):
+    """Test play_webradio_station to ensure it emits the correct event for a station."""
+    volumio_listener.socketIO = MagicMock()
+    title, uri = "Test Station", "station_uri"
+    volumio_listener.play_webradio_station(title, uri)
+
+    # Verify the event emitted to play the webradio station
+    expected_data = {
+        "service": "webradio",
+        "type": "webradio",
+        "title": title,
+        "uri": uri
+    }
+    volumio_listener.socketIO.emit.assert_called_once_with("replaceAndPlay", expected_data)
+
+
+if __name__ == "__main__":
+    pytest.main(["-v", "-s"])
+
+
+# File: test_mode_manager.py
+import time
+import pytest
+from unittest.mock import MagicMock, patch
+from src.display.clock import Clock
+from src.managers.mode_manager import ModeManager
+
+class MockDisplayManager:
+    def __init__(self):
+        self.oled = MagicMock(width=256, height=64)
+        self.display_text = MagicMock()
+        self.clear_screen = MagicMock()
         
-        # Store individual managers
-        self.playback_manager = playback_manager
-        self.menu_manager = menu_manager
-        self.playlist_manager = playlist_manager
-        self.radio_manager = radio_manager
-        self.tidal_manager = tidal_manager
-        self.qobuz_manager = qobuz_manager
+class MockPlayback:
+    def __init__(self):
+        self.start = MagicMock()
+        self.stop = MagicMock()
+
+class MockMenuManager:
+    def __init__(self):
+        self.start_mode = MagicMock()
+        self.stop_mode = MagicMock()
+
+def test_clock_initialization():
+    """Test that the clock can be initialized properly."""
+    mock_display_manager = MockDisplayManager()
+    mock_config = {}  # or create a MagicMock if config requires certain attributes
+
+    clock = Clock(mock_display_manager, mock_config)  # Pass the mock config
+    assert clock is not None
+
+def test_draw_clock():
+    """Test that the clock draws the correct time."""
+    mock_display_manager = MockDisplayManager()
+    clock = Clock(mock_display_manager, config={})
+
+    with patch('time.strftime', return_value="12:34"):
+        # Call the draw_clock method
+        clock.draw_clock()
+
+        # Verify that display_text is called with expected arguments
+        mock_display_manager.display_text.assert_called_once_with(
+            text="12:34",
+            position=(mock_display_manager.oled.width // 2, mock_display_manager.oled.height // 2),
+            font_key='clock_large'
+        )
+
+def test_clock_start_and_stop():
+    """Test starting and stopping the clock."""
+    mock_display_manager = MockDisplayManager()
+    mock_config = {}
+    clock = Clock(mock_display_manager, mock_config)
+
+    with patch.object(clock, 'update_clock', wraps=clock.update_clock) as mock_update_clock:
+        clock.start()
+        time.sleep(0.1)  # Allow the thread to start and run
+        clock.stop()
+
+        # Verify that update_clock was called (the clock thread ran)
+        assert mock_update_clock.call_count > 0
+
+    # Verify that the display was cleared when stopping the clock
+    mock_display_manager.clear_screen.assert_called_once()
+
+def test_mode_manager_transitions():
+    """Test that ModeManager transitions between different modes correctly."""
+    # Set up mock dependencies
+    mock_display_manager = MockDisplayManager()
+    mock_clock = MagicMock()
+    mock_playback = MockPlayback()
+    mock_menu_manager = MockMenuManager()
+    mock_playlist_manager = MagicMock()
+    mock_radio_manager = MagicMock()
+    mock_tidal_manager = MagicMock()
+
+    # Initialize ModeManager with mocks
+    mode_manager = ModeManager(
+        display_manager=mock_display_manager,
+        clock=mock_clock,
+        playback=mock_playback,
+        menu_manager=mock_menu_manager,
+        playlist_manager=mock_playlist_manager,
+        radio_manager=mock_radio_manager,
+        tidal_manager=mock_tidal_manager
+    )
+
+    # Test initial state is 'clock'
+    assert mode_manager.get_mode() == 'clock'
+    mock_clock.start.assert_called_once()
+
+    # Test transition to 'playback'
+    mode_manager.to_playback()
+    assert mode_manager.get_mode() == 'playback'
+    mock_playback.start.assert_called_once()
+    mock_clock.stop.assert_called_once()
+
+    # Test transition to 'menu'
+    mode_manager.to_menu()
+    assert mode_manager.get_mode() == 'menu'
+    mock_menu_manager.start_mode.assert_called_once()
+    mock_playback.stop.assert_called()
+
+    # Test transition to 'webradio'
+    mode_manager.to_webradio()
+    assert mode_manager.get_mode() == 'webradio'
+    mock_radio_manager.start_mode.assert_called_once()
+    mock_menu_manager.stop_mode.assert_called()
+
+    # Test transition to 'playlist'
+    mode_manager.to_playlist()
+    assert mode_manager.get_mode() == 'playlist'
+    mock_playlist_manager.start_mode.assert_called_once()
+    mock_radio_manager.stop_mode.assert_called()
+
+    # Test transition to 'tidal'
+    mode_manager.to_tidal()
+    assert mode_manager.get_mode() == 'tidal'
+    mock_tidal_manager.start_mode.assert_called_once()
+    mock_playlist_manager.stop_mode.assert_called()
+
+    # Test transition back to 'clock'
+    mode_manager.to_clock()
+    assert mode_manager.get_mode() == 'clock'
+    mock_clock.start.assert_called()
+    mock_tidal_manager.stop_mode.assert_called()
+
+
+# File: test_buttonsleds.py
+import unittest
+from unittest.mock import MagicMock, patch
+from src.hardware.buttonsleds import ButtonsLEDController
+from src.network.volumio_listener import VolumioListener
+
+
+class TestButtonsLEDController(unittest.TestCase):
+    def setUp(self):
+        # Create a mock VolumioListener with signal attributes
+        self.mock_volumio_listener = MagicMock(spec=VolumioListener)
+        self.mock_volumio_listener.state_changed = MagicMock()
+        self.mock_volumio_listener.connected = MagicMock()
+        self.mock_volumio_listener.disconnected = MagicMock()
+        
+        # Patch smbus2 to prevent actual I2C interaction
+        with patch('smbus2.SMBus'):
+            # Provide a custom config path, or use the default if already provided in `config.yaml`
+            self.controller = ButtonsLEDController(self.mock_volumio_listener, config_path='path/to/test/config.yaml')
+
+    def test_on_connect_updates_led(self):
+        # Call the on_connect directly and verify side effects in controller
+        self.controller.on_connect()
+        
+        # Check if the on_connect updated internal states or LEDs (example check)
+        # Here you can check if any expected LED state was set
+        # self.assertEqual(self.controller.status_led_state, expected_value)
+
+    def test_on_disconnect_updates_led(self):
+        # Call the on_disconnect directly and verify side effects in controller
+        self.controller.on_disconnect()
+        
+        # Check if the on_disconnect updated internal states or LEDs (example check)
+        # Here you can check if any expected LED state was cleared or set
+        # self.assertEqual(self.controller.status_led_state, expected_value)
+
+    def test_volumio_listener_state_change_updates_leds(self):
+        # Create a sample state to simulate state change
+        sample_state = {"status": "play"}
+        
+        # Simulate the state change event
+        self.controller.on_state(None, sample_state)
+        
+        # Check that the LED state was updated based on "play" status
+        expected_led_state = self.controller.status_led_state
+        self.assertEqual(expected_led_state, 0b10000000)  # LED1 value based on play status
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+
+
+# File: test_clock.py
+import time
+import pytest
+from unittest.mock import MagicMock, patch
+from src.display.clock import Clock
+
+class MockDisplayManager:
+    def __init__(self):
+        self.oled = MagicMock(width=256, height=64)
+        self.display_text = MagicMock()
+        self.clear_screen = MagicMock()
+
+def test_clock_initialization():
+    """Test that the clock can be initialized properly."""
+    mock_display_manager = MockDisplayManager()
+    mock_config = {}  # or create a MagicMock if config requires certain attributes
+
+    clock = Clock(mock_display_manager, mock_config)  # Pass the mock config
+    assert clock is not None
+
+def test_draw_clock():
+    """Test that the clock draws the correct time."""
+    mock_display_manager = MockDisplayManager()
+    clock = Clock(mock_display_manager, config={})
+
+    with patch('time.strftime', return_value="12:34"):
+        # Call the draw_clock method
+        clock.draw_clock()
+
+        # Verify that display_text is called with expected arguments
+        mock_display_manager.display_text.assert_called_once_with(
+            text="12:34",
+            position=(mock_display_manager.oled.width // 2, mock_display_manager.oled.height // 2),
+            font_key='clock_large'
+        )
+
+def test_clock_start_and_stop():
+    """Test starting and stopping the clock."""
+    mock_display_manager = MockDisplayManager()
+    mock_config = {}
+    clock = Clock(mock_display_manager, mock_config)
+
+    with patch.object(clock, 'update_clock', wraps=clock.update_clock) as mock_update_clock:
+        clock.start()
+        time.sleep(0.1)  # Allow the thread to start and run
+        clock.stop()
+
+        # Verify that update_clock was called (the clock thread ran)
+        assert mock_update_clock.call_count > 0
+
+    # Verify that the display was cleared when stopping the clock
+    mock_display_manager.clear_screen.assert_called_once()
+
+
+# File: volumio_listener_script.py
+import pytest
+from unittest.mock import MagicMock, patch, call
+from src.network.volumio_listener import VolumioListener
+from socketio import Client
+
+@pytest.fixture
+def volumio_listener():
+    # Mock dependencies for VolumioListener
+    mock_socket_client = MagicMock(spec=Client)
+    return VolumioListener(socket_client=mock_socket_client)
+
+@patch('src.network.volumio_listener.Client')
+def test_connect(mock_socket_client_class, volumio_listener):
+    """
+    Test that the VolumioListener can successfully call connect on the socket client.
+    """
+    mock_socket_client_instance = mock_socket_client_class.return_value
+    volumio_listener.connect()
+
+    # Assert connect method was called with the expected arguments
+    mock_socket_client_instance.connect.assert_called_once_with('http://localhost:3000', transports=['websocket'])
+    print("test_connect: Success")
+
+@patch('src.network.volumio_listener.Client')
+def test_emit_get_state(mock_socket_client_class, volumio_listener):
+    """
+    Test that the VolumioListener emits the "getState" event upon connecting.
+    """
+    mock_socket_client_instance = mock_socket_client_class.return_value
+    volumio_listener.connect()
+
+    # Verify that the getState event is emitted
+    mock_socket_client_instance.emit.assert_called_once_with("getState")
+    print("test_emit_get_state: Success")
+
+@patch('src.network.volumio_listener.Client')
+def test_register_event_handlers(mock_socket_client_class, volumio_listener):
+    """
+    Test that VolumioListener registers the expected event handlers.
+    """
+    mock_socket_client_instance = mock_socket_client_class.return_value
+    volumio_listener.connect()
+
+    # Ensure appropriate handlers are registered for events
+    expected_calls = [
+        call('pushState', volumio_listener._handle_push_state),
+        call('pushMultiRoomDevices', volumio_listener._handle_multi_room_devices),
+        call('closeAllModals', volumio_listener._handle_close_all_modals)
+    ]
+    mock_socket_client_instance.on.assert_has_calls(expected_calls, any_order=True)
+    print("test_register_event_handlers: Success")
+
+def test_handle_push_state(volumio_listener):
+    """
+    Test the _handle_push_state method directly.
+    """
+    mock_callback = MagicMock()
+    volumio_listener.state_changed.connect(mock_callback)
+
+    # Simulate a state change
+    test_state = {"status": "play", "artist": "Test Artist", "title": "Test Track"}
+    volumio_listener._handle_push_state(test_state)
+
+    # Verify the callback was invoked with correct state
+    mock_callback.assert_called_once_with(test_state)
+    print("test_handle_push_state: Success")
+
+def test_handle_multi_room_devices(volumio_listener):
+    """
+    Test the _handle_multi_room_devices method directly.
+    """
+    mock_callback = MagicMock()
+    volumio_listener.multi_room_devices_received.connect(mock_callback)
+
+    # Simulate multi-room devices data
+    test_devices = [{"name": "Room1", "host": "http://192.168.0.10"}]
+    volumio_listener._handle_multi_room_devices(test_devices)
+
+    # Verify the callback was invoked with correct devices list
+    mock_callback.assert_called_once_with(test_devices)
+    print("test_handle_multi_room_devices: Success")
+
+def test_handle_close_all_modals(volumio_listener):
+    """
+    Test the _handle_close_all_modals method directly.
+    """
+    mock_callback = MagicMock()
+    volumio_listener.close_all_modals.connect(mock_callback)
+
+    # Simulate close all modals event
+    volumio_listener._handle_close_all_modals()
+
+    # Verify the callback was invoked
+    mock_callback.assert_called_once()
+    print("test_handle_close_all_modals: Success")
+
+if __name__ == "__main__":
+    pytest.main(["-v", "-s"])
+
+# File: test_playback_manager.py
+import pytest
+from unittest.mock import MagicMock
+from src.display.playback_manager import PlaybackManager
+
+@pytest.fixture
+def playback_manager():
+    # Mock dependencies for PlaybackManager
+    display_manager = MagicMock()
+    volumio_listener = MagicMock()
+    mode_manager = MagicMock()
+
+    # Initialize PlaybackManager with mocks
+    return PlaybackManager(
+        display_manager=display_manager,
+        volumio_listener=volumio_listener,
+        mode_manager=mode_manager
+    )
+
+def test_start_mode(playback_manager):
+    """Test that start_mode activates playback mode and displays the current track."""
+    playback_manager.start_mode()
+    assert playback_manager.is_active is True
+    playback_manager.display_manager.draw_custom.assert_called_once()
+
+def test_stop_mode(playback_manager):
+    """Test that stop_mode deactivates playback mode and clears the display."""
+    playback_manager.start_mode()  # Activate mode first
+    playback_manager.stop_mode()
+    assert playback_manager.is_active is False
+    try:
+        playback_manager.display_manager.clear_display.assert_called_once()
+        print("clear_display successfully called in test_stop_mode.")
+    except AssertionError:
+        print("Failed: clear_display was not called as expected in test_stop_mode.")
+        raise
+
+def test_update_playback_state(playback_manager):
+    """Test that update_playback_state starts or stops playback mode based on the state."""
+    # Test starting playback
+    mock_state = {"status": "play"}
+    playback_manager.update_playback_state(mock_state)
+    assert playback_manager.is_active is True
+    playback_manager.display_manager.draw_custom.assert_called_once()
+
+    # Test stopping playback
+    mock_state = {"status": "pause"}
+    playback_manager.update_playback_state(mock_state)
+    assert playback_manager.is_active is False
+    try:
+        playback_manager.display_manager.clear_display.assert_called()
+        print("clear_display successfully called in test_update_playback_state.")
+    except AssertionError:
+        print("Failed: clear_display was not called as expected in test_update_playback_state.")
+        raise
+
+def test_update_current_track(playback_manager):
+    """Test that update_current_track updates the track information and displays it."""
+    playback_manager.start_mode()  # Ensure mode is active
+    mock_track_info = {"title": "Track 1", "artist": "Artist 1"}
+    playback_manager.update_current_track(mock_track_info)
+    assert playback_manager.current_track == mock_track_info
+    playback_manager.display_manager.draw_custom.assert_called()
+
+def test_toggle_play_pause(playback_manager):
+    """Test toggling between play and pause states."""
+    # Mock the current state to be "play"
+    playback_manager.volumio_listener.get_current_state.return_value = {"status": "play"}
+    playback_manager.toggle_play_pause()
+    playback_manager.volumio_listener.pause.assert_called_once()
+
+    # Mock the current state to be "pause"
+    playback_manager.volumio_listener.get_current_state.return_value = {"status": "pause"}
+    playback_manager.toggle_play_pause()
+    playback_manager.volumio_listener.play.assert_called_once()
+
+def test_skip_track(playback_manager):
+    """Test skipping to the next track."""
+    playback_manager.skip_track()
+    playback_manager.volumio_listener.next_track.assert_called_once()
+
+def test_previous_track(playback_manager):
+    """Test going back to the previous track."""
+    playback_manager.previous_track()
+    playback_manager.volumio_listener.previous_track.assert_called_once()
+
+def test_adjust_volume(playback_manager):
+    """Test adjusting the volume by a specified increment."""
+    # Mock current volume
+    playback_manager.volumio_listener.get_volume.return_value = 50
+
+    # Increase volume
+    playback_manager.adjust_volume(increment=10)
+    playback_manager.volumio_listener.set_volume.assert_called_with(60)
+
+    # Decrease volume
+    playback_manager.adjust_volume(increment=-20)
+    playback_manager.volumio_listener.set_volume.assert_called_with(30)
+
+def test_handle_mode_change(playback_manager):
+    """Test that handle_mode_change starts or stops playback manager based on mode."""
+    # When mode is "playback", start_mode should be called
+    playback_manager.handle_mode_change("playback")
+    assert playback_manager.is_active is True
+    playback_manager.display_manager.draw_custom.assert_called()
+
+    # When mode changes away from "playback", stop_mode should be called
+    playback_manager.handle_mode_change("radio")
+    assert playback_manager.is_active is False
+    try:
+        playback_manager.display_manager.clear_display.assert_called()
+        print("clear_display successfully called in test_handle_mode_change.")
+    except AssertionError:
+        print("Failed: clear_display was not called as expected in test_handle_mode_change.")
+        raise
+
 
 

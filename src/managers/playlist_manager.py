@@ -31,9 +31,12 @@ class PlaylistManager(BaseManager):
             self.logger.info("PlaylistManager: Displaying existing playlists.")
 
     def stop_mode(self):
+        if not self.is_active:
+            self.logger.debug("stop_mode called, but mode is already inactive.")  # Corrected to use self.logger
+            return
         self.is_active = False
         self.display_manager.clear_screen()
-        self.logger.info("PlaylistManager: Stopped playlist mode and cleared display.")
+        self.logger.info("PlaylistManager: Stopped playlist mode and cleared display.")  # Corrected to use self.logger
 
     def update_playlists(self, playlists):
         self.playlists = playlists or []

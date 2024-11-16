@@ -1,8 +1,7 @@
-# src/managers/mode_manager.py
-
 from transitions import Machine
 import threading
 import logging
+
 
 class ModeManager:
     states = [
@@ -31,15 +30,15 @@ class ModeManager:
         self.logger.setLevel(logging.INFO)  # Set to INFO or DEBUG as needed
         self.logger.info("ModeManager initialized.")
 
-        # Set up transitions and states
+        # Initialize state machine
         self.machine = Machine(
             model=self,
             states=ModeManager.states,
-            initial='clock',
-            auto_transitions=False
+            initial='clock',  # Default initial state
+            send_event=True  # Pass event object to callbacks
         )
 
-        # Define transitions without 'before' since 'on_enter' handles method calls
+        # Define transitions
         self.machine.add_transition(trigger='to_playback', source='*', dest='playback')
         self.machine.add_transition(trigger='to_menu', source='*', dest='menu')
         self.machine.add_transition(trigger='to_webradio', source='*', dest='webradio')
@@ -49,13 +48,16 @@ class ModeManager:
         self.machine.add_transition(trigger='to_qobuz', source='*', dest='qobuz')
         self.machine.add_transition(trigger='to_clock', source='*', dest='clock')
 
+        # Callback handling
         self.on_mode_change_callbacks = []
         self.lock = threading.Lock()
 
-        # Explicitly call 'enter_clock' to ensure initial state is set
-        self.enter_clock(event=None)
+    def get_mode(self):
+        """Return the current mode."""
+        return self.state  # The current state from transitions' state machine
 
     def add_on_mode_change_callback(self, callback):
+        """Register a callback for mode changes."""
         with self.lock:
             if callable(callback):
                 self.on_mode_change_callbacks.append(callback)
@@ -168,6 +170,7 @@ class ModeManager:
         self.notify_mode_change('clock')
 
     def process_state_change(self, state):
+        """Process playback state changes from Volumio."""
         status = state.get("status", "")
         self.logger.debug(f"ModeManager: Processing state change, Volumio status: {status}")
 

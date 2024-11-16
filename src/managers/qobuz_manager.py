@@ -37,9 +37,12 @@ class QobuzManager(BaseManager):
             self.logger.info("QobuzManager: Displaying existing Qobuz playlists.")
 
     def stop_mode(self):
+        if not self.is_active:
+            self.logger.debug("stop_mode called, but mode is already inactive.")  # Corrected to use self.logger
+            return
         self.is_active = False
         self.display_manager.clear_screen()
-        self.logger.info("QobuzManager: Stopped Qobuz mode and cleared display.")
+        self.logger.info("QobuzManager: Stopped Qobuz mode and cleared display.")  # Corrected to use self.logger
 
     def update_qobuz_playlists(self, playlists):
         with self.lock:

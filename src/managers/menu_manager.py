@@ -1,54 +1,55 @@
-# src/managers/menu_manager.py
-
-from src.managers.base_manager import BaseManager
 import logging
 from PIL import Image, ImageDraw, ImageFont
 
-class MenuManager(BaseManager):
+class MenuManager:
     def __init__(self, display_manager, volumio_listener, mode_manager):
-        super().__init__(display_manager, volumio_listener, mode_manager)
-        
+        self.display_manager = display_manager
+        self.volumio_listener = volumio_listener
+        self.mode_manager = mode_manager
+
         # Initialize logger
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.INFO)  # Set to INFO or DEBUG as needed
-
-        # Create console handler with a higher log level
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)  # Adjust as needed
-
-        # Create formatter and add it to the handlers
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        ch.setFormatter(formatter)
-
-        # Add the handlers to the logger
-        if not self.logger.handlers:
-            self.logger.addHandler(ch)
-
+        self.logger.setLevel(logging.INFO)  # Set logging level to INFO or DEBUG as needed
         self.logger.info("MenuManager initialized.")
 
-        # Load or initialize menu items
-        self.menu_stack = []
+        # Menu initialization
+        self.menu_stack = []  # Stack to keep track of menu levels
         self.current_menu_items = ["Webradio", "Playlists", "Favourites", "Tidal", "Qobuz"]
         self.current_selection_index = 0
+        self.is_active = False  # Indicates if menu mode is currently active
+
+        # Font settings
         self.font_key = 'menu_font'  # Define in config.yaml under fonts
 
         # Register mode change callback
-        self.display_manager.add_on_mode_change_callback(self.handle_mode_change)
-        self.logger.debug("MenuManager: Registered mode change callback.")
+        if hasattr(self.mode_manager, "add_on_mode_change_callback"):
+            self.mode_manager.add_on_mode_change_callback(self.handle_mode_change)
+
+    def handle_mode_change(self, current_mode):
+        self.logger.info(f"MenuManager handling mode change to: {current_mode}")
+        if current_mode == "menu":
+            self.logger.info("Entering menu mode...")
+            self.start_mode()
+        elif self.is_active:
+            self.logger.info("Exiting menu mode...")
+            self.stop_mode()
 
     def start_mode(self):
+        self.logger.info("MenuManager: Starting menu mode.")
         self.is_active = True
         self.current_selection_index = 0
-        self.logger.info("MenuManager: Starting menu mode.")
         self.display_menu()
 
     def stop_mode(self):
+        if not self.is_active:
+            self.logger.debug("stop_mode called, but mode is already inactive.")
+            return
         self.is_active = False
-        self.display_manager.clear_screen()  # Updated method name
+        self.display_manager.clear_screen()
         self.logger.info("MenuManager: Stopped menu mode and cleared display.")
 
     def display_menu(self):
-        self.logger.debug("MenuManager: Displaying menu.")
+        self.logger.info("MenuManager: Displaying menu.")
         def draw(draw_obj):
             y_offset = 10
             for i, item in enumerate(self.current_menu_items):
@@ -60,7 +61,7 @@ class MenuManager(BaseManager):
                     fill="white" if i == self.current_selection_index else "gray"
                 )
         self.display_manager.draw_custom(draw)
-        self.logger.info("MenuManager: Menu displayed.")
+        self.logger.debug("MenuManager: Menu displayed.")
 
     def scroll_selection(self, direction):
         if not self.is_active:
@@ -92,7 +93,6 @@ class MenuManager(BaseManager):
         if current_mode == "menu":
             self.logger.info("MenuManager: Entering menu mode.")
             self.start_mode()
-        else:
-            if self.is_active:
-                self.logger.info("MenuManager: Exiting menu mode.")
-                self.stop_mode()
+        elif self.is_active:
+            self.logger.info("MenuManager: Exiting menu mode.")
+            self.stop_mode()

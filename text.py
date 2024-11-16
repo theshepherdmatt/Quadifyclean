@@ -1,7 +1,7 @@
 import os
 
 # Define the path to the folder containing your Python scripts and the output file path
-folder_path = '/home/volumio/Quadifyclean/src/managers'
+folder_path = '/home/volumio/Quadifyclean/tests/'
 output_file = 'combined_scripts.txt'
 
 # Open the output file in write mode
